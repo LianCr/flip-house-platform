@@ -1,0 +1,29 @@
+{
+  "name": "flip-platform-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@cloudscape-design/board-components": "^3.0.226",
+    "@cloudscape-design/chat-components": "^1.0.169",
+    "@cloudscape-design/collection-hooks": "^1.0.0",
+    "@cloudscape-design/components": "^3.0.1365",
+    "@cloudscape-design/design-tokens": "^3.0.112",
+    "@cloudscape-design/global-styles": "^1.0.68",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,182 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import BreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
+import Button from '@cloudscape-design/components/button';
+import ButtonDropdown from '@cloudscape-design/components/button-dropdown';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Grid from '@cloudscape-design/components/grid';
+import Header from '@cloudscape-design/components/header';
+import Modal from '@cloudscape-design/components/modal';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
+import Tabs from '@cloudscape-design/components/tabs';
+import StatusBadge from '../../components/StatusBadge';
+import CoverImage from '../../components/CoverImage';
+import WorkflowCards from '../../components/WorkflowCards';
+import ReviewTag from '../../components/ReviewTag';
+import { Meter } from '../../components/charts';
+import { api, Project } from '../../api/client';
+import { useFlash } from '../../lib/flash';
+import { dateStr, money, num, pct } from '../../lib/format';
+import { labelOf, useMeta } from '../../lib/meta';
+import OverviewTab from './OverviewTab';
+import AnalysisTab from './AnalysisTab';
+import DataTab from './DataTab';
+import FilesTab from './FilesTab';
+import BudgetTab from './BudgetTab';
+import EditProjectModal from './EditProjectModal';
+
+const STAGE_COLOR: Record<string, 'severity-low' | 'severity-medium' | 'green'> = { lead: 'severity-low', active: 'severity-medium', portfolio: 'green' };
+
+const daysBetween = (a: string | null, b: string | null) => (a && b ? Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000) : null);
+const short = (d: string | null) => (d ? d.slice(5).replace('-', '/') : '—');
+
+/** 身份卡右侧“交易”一栏：按阶段说结论。 */
+function DealSummary({ p }: { p: Project }) {
+  const prop = p.property;
+  if (p.stage === 'lead') {
+    return (
+      <SpaceBetween size="xxs">
+        <Box fontSize="heading-m" fontWeight="bold">挂牌 {money(prop.list_price)} <Box variant="span" color="text-body-secondary" fontWeight="normal">· 估值 {money(prop.avm_value)}</Box></Box>
+        <Box color="text-body-secondary">{p.target_arv ? `目标售价 ${money(p.target_arv)}${p.purchase_price ? `，意向价 ${money(p.purchase_price)}` : ''}` : '目标售价未定，先在“分析”里算一遍'}</Box>
+      </SpaceBetween>
+    );
+  }
+  if (p.stage === 'portfolio') {
+    const profit = p.sale_price != null ? p.sale_price - (p.purchase_price ?? 0) - p.budget_spent : null;
+    const cost = (p.purchase_price ?? 0) + p.budget_spent;
+    return (
+      <SpaceBetween size="xxs">
+        <Box fontSize="heading-m" fontWeight="bold">买入 {money(p.purchase_price)} → 成交 {money(p.sale_price)}</Box>
+        <Box color="text-body-secondary">{profit == null ? '成交价未填' : `实际利润 ${money(profit)} · 利润率 ${cost ? pct(profit / cost * 100) : '—'}${p.target_arv ? ` · 目标售价 ${money(p.target_arv)}` : ''}`}</Box>
+      </SpaceBetween>
+    );
+  }
+  const cost = (p.purchase_price ?? 0) + Math.max(p.budget_planned, p.budget_spent);
+  const profit = p.target_arv != null ? p.target_arv - cost : null;
+  return (
+    <SpaceBetween size="xxs">
+      <Box fontSize="heading-m" fontWeight="bold">买入 {money(p.purchase_price)} → 目标售价 {money(p.target_arv)}</Box>
+      <Box color="text-body-secondary">{profit == null ? '目标售价未定' : `预计利润 ${money(profit)} · 利润率 ${cost ? pct(profit / cost * 100) : '—'} · 装修预算 ${money(p.budget_planned)}`}</Box>
+    </SpaceBetween>
+  );
+}
+
+/** 身份卡右侧“时间”一栏。 */
+function Timeline({ p }: { p: Project }) {
+  const steps = ([['买入', p.purchase_date], ['开工', p.construction_start], ['计划完工', p.construction_end], ['挂牌', p.list_date], ['成交', p.sale_date]] as [string, string | null][])
+    .filter(([, d]) => d) as [string, string][];
+  const total = daysBetween(p.construction_start, p.construction_end);
+  const elapsed = daysBetween(p.construction_start, new Date().toISOString().slice(0, 10));
+  return (
+    <SpaceBetween size="xxs">
+      <Box fontSize="heading-m" fontWeight="bold">{steps.length ? steps.map(([k, d]) => `${k} ${short(d)}`).join(' → ') : '还没有关键日期'}</Box>
+      {p.stage === 'active' && total && elapsed != null ? (
+        <Meter value={Math.max(0, elapsed)} max={total} label="工期" reading={`第 ${Math.max(0, elapsed)} / ${total} 天`} targetLabel="完工" height={6} note={elapsed > total ? `已超期 ${elapsed - total} 天` : undefined} />
+      ) : p.stage === 'portfolio' && p.list_date && p.sale_date ? (
+        <Box color="text-body-secondary">挂牌到成交 {daysBetween(p.list_date, p.sale_date)} 天{total ? `，工期 ${total} 天` : ''}</Box>
+      ) : (
+        <Box color="text-body-secondary">创建于 {dateStr(p.created_at)}，最近更新 {dateStr(p.updated_at)}</Box>
+      )}
+    </SpaceBetween>
+  );
+}
+
+export default function ProjectPage() {
+  const { id } = useParams();
+  const pid = Number(id);
+  const navigate = useNavigate();
+  const meta = useMeta();
+  const flash = useFlash();
+  const [params, setParams] = useSearchParams();
+  const [project, setProject] = useState<Project | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const reload = useCallback(() => api.project(pid).then(setProject), [pid]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (!project) return <Box padding="xxl" textAlign="center"><Spinner size="large" /></Box>;
+
+  const tab = params.get('tab') ?? 'overview';
+  const prop = project.property;
+  const specs = [prop.year_built ? `${prop.year_built} 年` : null, prop.sqft ? `${num(prop.sqft)} sqft` : null, prop.beds != null ? `${prop.beds} 卧 ${prop.baths_full ?? 0} 卫` : null, prop.style].filter(Boolean).join(' · ');
+
+  return (
+    <ContentLayout
+      breadcrumbs={<BreadcrumbGroup items={[{ text: '工作台', href: '/' }, { text: '项目', href: '/projects' }, { text: project.name, href: `/projects/${pid}` }]} onFollow={(e) => { e.preventDefault(); navigate(e.detail.href); }} />}
+      header={
+        <Container>
+          <Grid gridDefinition={[{ colspan: { default: 12, s: 3 } }, { colspan: { default: 12, s: 9 } }]}>
+            <CoverImage propertyId={prop.id} height={150} radius={8} />
+            <SpaceBetween size="m">
+              <Header
+                variant="h1"
+                description={<span>{prop.address_std}{specs ? ` · ${specs}` : ''}</span>}
+                actions={
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button onClick={() => setEditing(true)}>编辑</Button>
+                    <ButtonDropdown items={[{ id: 'delete', text: '删除项目' }]} onItemClick={({ detail }) => { if (detail.id === 'delete') setConfirmDelete(true); }}>操作</ButtonDropdown>
+                  </SpaceBetween>
+                }
+              >
+                <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+                  <ReviewTag id="A" />
+                  <span>{project.name}</span>
+                  <Badge color={STAGE_COLOR[project.stage] ?? 'grey'}>{labelOf(meta?.stages, project.stage)} · {labelOf(meta?.substages[project.stage], project.substage)}</Badge>
+                  <Badge color="grey">{labelOf(meta?.strategies, project.strategy)}</Badge>
+                  <StatusBadge status={project.status} />
+                </SpaceBetween>
+              </Header>
+              <ColumnLayout columns={2} variant="text-grid">
+                <div>
+                  <Box variant="awsui-key-label">交易</Box>
+                  <DealSummary p={project} />
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">时间</Box>
+                  <Timeline p={project} />
+                </div>
+              </ColumnLayout>
+            </SpaceBetween>
+          </Grid>
+        </Container>
+      }
+    >
+      <SpaceBetween size="l">
+        <WorkflowCards project={project} />
+        <Tabs
+          activeTabId={tab}
+          onChange={({ detail }) => setParams({ tab: detail.activeTabId })}
+          tabs={[
+            { id: 'overview', label: '总览', content: <OverviewTab project={project} reload={reload} /> },
+            { id: 'analysis', label: '分析', content: <AnalysisTab project={project} reload={reload} /> },
+            { id: 'data', label: '数据', content: <DataTab projectId={pid} reload={reload} /> },
+            { id: 'files', label: '文件', content: <FilesTab projectId={pid} /> },
+            { id: 'budget', label: '预算', content: <BudgetTab projectId={pid} reload={reload} /> },
+          ]}
+        />
+      </SpaceBetween>
+      <EditProjectModal visible={editing} project={project} onDismiss={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />
+      <Modal
+        visible={confirmDelete}
+        onDismiss={() => setConfirmDelete(false)}
+        header="删除项目"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setConfirmDelete(false)}>取消</Button>
+              <Button variant="primary" onClick={async () => { await api.deleteProject(pid); flash({ type: 'success', content: `已删除“${project.name}”` }); navigate('/'); }}>删除</Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        确定删除“{project.name}”？项目下的预算、支出、文件登记和分析会一起删除，房产记录保留。
+      </Modal>
+    </ContentLayout>
+  );
+}

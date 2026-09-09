@@ -1,0 +1,14 @@
+# Render Blueprint：在 render.com 选 New → Blueprint → 选这个仓库 → Apply 即可。
+# 之后每次推送到 main 自动重新部署。
+services:
+  - type: web
+    name: flip-house-platform
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PROVIDER
+        value: mock
+      - key: DATA_DIR
+        value: /app/backend/data
