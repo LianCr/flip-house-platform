@@ -4,7 +4,7 @@
 
 当前是 MVP 0：验证数据层思路，用模拟数据源演示。界面用 AWS 控制台的开源组件库 Cloudscape。
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/OWNER/flip-house-platform)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/LianCr/flip-house-platform)
 
 ---
 
