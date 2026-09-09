@@ -37,7 +37,7 @@ for r in (meta, dashboard, lookup, projects, property_data, files, budget, analy
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "commit": os.getenv("RENDER_GIT_COMMIT", "local")[:7]}
 
 
 # ---- 生产环境：同一容器提供前端静态文件（本地开发时 dist 不存在则跳过）----
