@@ -27,6 +27,7 @@ import { useFlash } from '../lib/flash';
 import { dateStr, money, pct, text } from '../lib/format';
 import { useMeta } from '../lib/meta';
 import ReviewTag from '../components/ReviewTag';
+import OwnerTag from '../components/OwnerTag';
 
 type FieldState = { value: string; source: string; confidence: number | null; note: string | null; label: string; field: string };
 
@@ -166,7 +167,7 @@ export default function AddProject() {
             title: '输入地址',
             description: '当前为模拟数据源，接口形状与真实源一致。',
             content: (
-              <Container header={<Header variant="h2"><ReviewTag id="A" />地址</Header>}>
+              <Container header={<Header variant="h2"><ReviewTag id="A" /><OwnerTag block="wizard" />地址</Header>}>
                 <SpaceBetween size="m">
                   <FormField label="房产地址" description="输入门牌号和街道，从候选中选择。试试：Fisk、Parkville、Alvarado。">
                     <Autosuggest
@@ -251,7 +252,7 @@ export default function AddProject() {
             title: '项目设置',
             content: (
               <SpaceBetween size="l">
-                <Container header={<Header variant="h2"><ReviewTag id="G" />策略与阶段</Header>}>
+                <Container header={<Header variant="h2"><ReviewTag id="G" /><OwnerTag block="wizard" />策略与阶段</Header>}>
                   <SpaceBetween size="l">
                     <FormField label="项目名称">
                       <Input value={name} onChange={({ detail }) => setName(detail.value)} />

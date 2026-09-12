@@ -27,6 +27,7 @@ import { useFlash } from '../../lib/flash';
 import { money, pct } from '../../lib/format';
 import { useMeta } from '../../lib/meta';
 import ReviewTag from '../../components/ReviewTag';
+import OwnerTag from '../../components/OwnerTag';
 
 const num = (v: unknown) => { const x = typeof v === 'string' ? parseFloat(v) : (v as number); return Number.isFinite(x) ? x : 0; };
 const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -127,7 +128,7 @@ export default function AnalysisTab({ project, reload }: { project: Project; rel
 
   if (!inputs || !out || !aid) {
     return (
-      <Container header={<Header variant="h2"><ReviewTag id="A" />交易分析</Header>}>
+      <Container header={<Header variant="h2"><ReviewTag id="A" /><OwnerTag block="analysis" />交易分析</Header>}>
         <SpaceBetween size="m">
           <Box>还没有算过账。系统会用已知数据（估值、挂牌价、房产税、面积）和行业默认值预填一份，你只需要改动你更清楚的数字。</Box>
           <SpaceBetween direction="horizontal" size="xs">
@@ -183,7 +184,7 @@ export default function AnalysisTab({ project, reload }: { project: Project; rel
               </SpaceBetween>
             }
           >
-            <ReviewTag id="A" />交易分析
+            <ReviewTag id="A" /><OwnerTag block="analysis" />交易分析
           </Header>
         }
       >

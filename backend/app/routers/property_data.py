@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..db import get_db
 from ..dictionaries import PROPERTY_FIELDS
-from .common import cast_value, set_field_with_source
+from .common import cast_value, get_actor, log_update, set_field_with_source
+
+FIELD_LABEL = {f["key"]: f["label"] for f in PROPERTY_FIELDS}
 
 router = APIRouter(prefix="/api/projects/{project_id}/property", tags=["property"])
 
@@ -48,18 +50,19 @@ def get_property(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("", response_model=schemas.PropertyDataOut)
-def patch_field(project_id: int, body: schemas.FieldPatch, db: Session = Depends(get_db)):
+def patch_field(project_id: int, body: schemas.FieldPatch, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     prop = _prop(db, project_id)
     if body.field not in {f["key"] for f in PROPERTY_FIELDS}:
         raise HTTPException(400, "未知字段")
-    set_field_with_source(db, prop, body.field, body.value, "manual", 1.0, "人工修改", make_primary=True)
+    set_field_with_source(db, prop, body.field, body.value, "manual", 1.0, f"{actor} 修改", make_primary=True)
+    log_update(db, project_id, actor, "data", f"把“{FIELD_LABEL.get(body.field, body.field)}”改成 {body.value if body.value not in (None, '') else '空'}")
     db.commit()
     db.refresh(prop)
     return _out(prop)
 
 
 @router.post("/fields/{field}/primary", response_model=schemas.PropertyDataOut)
-def set_primary(project_id: int, field: str, body: schemas.PrimaryIn, db: Session = Depends(get_db)):
+def set_primary(project_id: int, field: str, body: schemas.PrimaryIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     prop = _prop(db, project_id)
     target = None
     for s in prop.field_sources:
@@ -70,6 +73,7 @@ def set_primary(project_id: int, field: str, body: schemas.PrimaryIn, db: Sessio
     if target is None:
         raise HTTPException(404, "来源记录不存在")
     setattr(prop, field, cast_value(field, target.value))
+    log_update(db, project_id, actor, "data", f"“{FIELD_LABEL.get(field, field)}”选用了{target.source}来源的值 {target.value}")
     db.commit()
     db.refresh(prop)
     return _out(prop)

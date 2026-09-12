@@ -1,14 +1,29 @@
 """路由共用的序列化与计算。"""
 
+from typing import Optional
+from urllib.parse import unquote
+
+from fastapi import Header
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..dictionaries import KEY_FIELDS_FOR_COMPLETENESS, PROPERTY_FIELDS
 from ..status import compute_status
+from ..steps import compute_steps
 
 FIELD_TYPES = {f["key"]: f["type"] for f in PROPERTY_FIELDS}
 FIELD_LABELS = {f["key"]: f["label"] for f in PROPERTY_FIELDS}
+
+
+def get_actor(x_actor: Optional[str] = Header(default=None)) -> str:
+    """当前操作人：前端把顶栏“我是谁”放在 X-Actor 头里（URL 编码）。取不到就是负责人。"""
+    return unquote(x_actor) if x_actor else "负责人"
+
+
+def log_update(db: Session, project_id: int, actor: str, kind: str, text: str) -> None:
+    """谁改了什么，记一条给负责人看。调用方负责 commit。"""
+    db.add(models.ProjectUpdate(project_id=project_id, actor=actor or "负责人", kind=kind, text=text))
 
 
 def cast_value(field: str, value):
@@ -38,6 +53,7 @@ def project_out(db: Session, p: models.Project) -> schemas.ProjectOut:
         missing.append("买入价")
     if p.target_arv is None:
         missing.append("目标售价（ARV）")
+    steps = compute_steps(db, p)
     return schemas.ProjectOut(
         id=p.id, name=p.name, strategy=p.strategy, stage=p.stage, substage=p.substage,
         lead_heat=p.lead_heat, status=status, status_reason=reason,
@@ -51,6 +67,7 @@ def project_out(db: Session, p: models.Project) -> schemas.ProjectOut:
         budget_used_pct=(round(spent / planned * 100, 1) if planned > 0 else None),
         missing_fields=missing,
         analysis_count=len(p.analyses),
+        current_stage=steps["current_stage"], next_up=steps["next_up"],
     )
 
 

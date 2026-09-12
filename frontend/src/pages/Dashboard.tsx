@@ -26,12 +26,14 @@ import StatusBadge from '../components/StatusBadge';
 import CoverImage from '../components/CoverImage';
 import ReviewTag from '../components/ReviewTag';
 import { BulletList, DeltaBadge, HBars, InlineBar, Meter, StackedBar, StatTile, Trend, compactMoney, fullMoney } from '../components/charts';
-import { api, AddressCandidate, DashboardSummary, DashboardWidgets, Project } from '../api/client';
+import { api, AddressCandidate, DashboardSummary, DashboardWidgets, Project, Update } from '../api/client';
+import UpdatesList from '../components/UpdatesList';
+import { OwnerDot } from '../components/OwnerTag';
 import { dateStr, money, pct } from '../lib/format';
 import { headline, Insight, loadInsights } from '../lib/insights';
 import { labelOf, useMeta } from '../lib/meta';
 
-type WidgetId = 'attention' | 'money' | 'stages' | 'recent' | 'list' | 'upcoming' | 'capital' | 'retro' | 'weekly' | 'vendors' | 'funnel';
+type WidgetId = 'attention' | 'money' | 'stages' | 'recent' | 'list' | 'upcoming' | 'capital' | 'retro' | 'weekly' | 'vendors' | 'funnel' | 'updates' | 'turns';
 type ItemData = { title: string; tag: string };
 type Item = BoardProps.Item<ItemData>;
 
@@ -47,9 +49,11 @@ const WIDGETS: Record<WidgetId, ItemData & { cols: number; rows: number }> = {
   weekly: { title: '近 12 周支出', tag: 'J', cols: 2, rows: 4 },
   vendors: { title: '供应商支出前五', tag: 'K', cols: 2, rows: 4 },
   funnel: { title: '线索漏斗', tag: 'L', cols: 1, rows: 4 },
+  updates: { title: '谁更新了什么', tag: 'M', cols: 2, rows: 4 },
+  turns: { title: '每套房轮到谁', tag: 'N', cols: 2, rows: 4 },
 };
-const DEFAULT_ORDER: WidgetId[] = ['attention', 'upcoming', 'money', 'capital', 'stages', 'funnel', 'weekly', 'retro', 'vendors', 'recent', 'list'];
-const LAYOUT_KEY = 'boardLayout.v2';
+const DEFAULT_ORDER: WidgetId[] = ['attention', 'turns', 'updates', 'upcoming', 'money', 'capital', 'stages', 'funnel', 'weekly', 'retro', 'vendors', 'recent', 'list'];
+const LAYOUT_KEY = 'boardLayout.v3';
 
 function mkItem(id: WidgetId, extra?: Partial<Item>): Item {
   const w = WIDGETS[id];
@@ -96,6 +100,7 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
   const [widgets, setWidgets] = useState<DashboardWidgets | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
+  const [updates, setUpdates] = useState<Update[]>([]);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<ReadonlyArray<Item>>(loadLayout);
   const [stage, setStage] = useState<{ label: string; value: string }>({ label: '全部阶段', value: '' });
@@ -105,8 +110,8 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.dashboard(), api.projects(), api.widgets()])
-      .then(async ([s, p, w]) => { setSummary(s); setProjects(p); setWidgets(w); setInsights(await loadInsights(p)); })
+    Promise.all([api.dashboard(), api.projects(), api.widgets(), api.updates(20).catch(() => [] as Update[])])
+      .then(async ([s, p, w, u]) => { setSummary(s); setProjects(p); setWidgets(w); setUpdates(u); setInsights(await loadInsights(p)); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -227,6 +232,21 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
         );
       case 'list':
         return table;
+      case 'updates':
+        return <UpdatesList items={updates} showProject onGo={go} emptyText={loading ? '正在读取…' : '还没有人更新过。'} />;
+      case 'turns': {
+        const turns = projects.filter((p) => p.stage !== 'portfolio' && p.next_up.length);
+        return turns.length ? (
+          <SpaceBetween size="xs">
+            {turns.map((p) => (
+              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: 8, alignItems: 'baseline' }}>
+                <Box>{projLink(p.id, p.name)} <Box variant="small" color="text-body-secondary">{p.current_stage?.label}</Box></Box>
+                <Box>{p.next_up.slice(0, 2).map((n) => <span key={n.key} style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8 }}>{n.owners.map((o) => <OwnerDot key={o} code={o} />)}<span style={{ fontWeight: n.gate ? 700 : 400 }}>{n.title}</span></span>)}</Box>
+              </div>
+            ))}
+          </SpaceBetween>
+        ) : empty(loading ? '正在读取…' : '没有在进行中的房子。');
+      }
       case 'upcoming': {
         const ups = widgets?.upcoming ?? [];
         return ups.length ? (

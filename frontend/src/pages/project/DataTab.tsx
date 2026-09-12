@@ -13,6 +13,7 @@ import { api, PropertyData } from '../../api/client';
 import { useFlash } from '../../lib/flash';
 import { dateStr, money, pct, text } from '../../lib/format';
 import ReviewTag from '../../components/ReviewTag';
+import OwnerTag from '../../components/OwnerTag';
 
 export default function DataTab({ projectId, reload }: { projectId: number; reload: () => Promise<any> }) {
   const flash = useFlash();
@@ -32,7 +33,7 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
           id: 'specs',
           label: '房产规格',
           content: (
-            <Container header={<Header variant="h2" description={conflicts ? `${conflicts} 个字段存在来源冲突，请点开红色标记选择主值。` : '每个字段右侧是主值来源，悬停可看时间与把握度。'}><ReviewTag id="A" />房产、结构与地块</Header>}>
+            <Container header={<Header variant="h2" description={conflicts ? `${conflicts} 个字段存在来源冲突，请点开红色标记选择主值。` : '每个字段右侧是主值来源，悬停可看时间与把握度。'}><ReviewTag id="A" /><OwnerTag block="data.specs" />房产、结构与地块</Header>}>
               <ColumnLayout columns={3} variant="text-grid">
                 {data.fields.map((f) => (
                   <FieldWithSource
@@ -50,7 +51,7 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
           id: 'owner',
           label: '业主',
           content: (
-            <Container header={<Header variant="h2"><ReviewTag id="B" />业主信息</Header>}>
+            <Container header={<Header variant="h2"><ReviewTag id="B" /><OwnerTag block="data.owner" />业主信息</Header>}>
               {data.owner ? (
                 <KeyValuePairs columns={3} items={[
                   { label: '业主', value: text(data.owner.name) },
@@ -68,7 +69,7 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
           label: '按揭',
           content: (
             <Table
-              header={<Header variant="h2" counter={`(${data.mortgages.length})`}><ReviewTag id="C" />当前按揭</Header>}
+              header={<Header variant="h2" counter={`(${data.mortgages.length})`}><ReviewTag id="C" /><OwnerTag block="data.mortgage" />当前按揭</Header>}
               items={data.mortgages}
               empty={<Box textAlign="center" color="inherit">无按揭记录</Box>}
               columnDefinitions={[
@@ -90,7 +91,7 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
           content: (
             <SpaceBetween size="l">
               <Table
-                header={<Header variant="h2" counter={`(${data.sales_history.length})`}><ReviewTag id="D" />成交史</Header>}
+                header={<Header variant="h2" counter={`(${data.sales_history.length})`}><ReviewTag id="D" /><OwnerTag block="data.history" />成交史</Header>}
                 items={data.sales_history}
                 empty={<Box textAlign="center" color="inherit">无成交记录</Box>}
                 columnDefinitions={[

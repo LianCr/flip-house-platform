@@ -9,7 +9,23 @@ export interface Meta {
   file_types: (Option & { stage: string })[];
   sources: Option[];
   property_fields: { key: string; label: string; type: string }[];
+  people: { code: string; label: string; role: string }[];
+  owner_map: Record<string, string[]>;
+  file_default_owner: Record<string, string>;
+  stage_checklist: { key: string; label: string; items: { key: string; title: string; owners: string[]; evidence: string; gate?: boolean }[] }[];
 }
+
+export interface StepItem {
+  key: string; title: string; owners: string[]; gate: boolean; done: boolean; how: 'auto' | 'manual' | null;
+  evidence: string | null; can_auto: boolean; done_by: string | null; done_at: string | null; note: string | null;
+}
+export interface Steps {
+  stages: { key: string; label: string; items: StepItem[]; done_count: number; total: number }[];
+  current_stage: { key: string; label: string; index?: number };
+  next_up: { key: string; title: string; owners: string[]; gate: boolean }[];
+  earlier_undone: { key: string; title: string; owners: string[]; stage: string }[];
+}
+export interface Update { id: number; project_id: number; project_name: string | null; actor: string; kind: string; text: string; created_at: string }
 
 export interface AddressCandidate {
   label: string; street: string; city: string; state: string; zip: string; lat?: number | null; lng?: number | null;
@@ -46,6 +62,7 @@ export interface Project {
   construction_end: string | null; list_date: string | null; sale_date: string | null; sale_price: number | null;
   risks: string | null; notes: string | null; created_at: string; updated_at: string; property: PropertyBrief;
   budget_planned: number; budget_spent: number; budget_used_pct: number | null; missing_fields: string[]; analysis_count: number;
+  current_stage: { key: string; label: string } | null; next_up: { key: string; title: string; owners: string[]; gate: boolean }[];
 }
 
 export interface SourceRec {
@@ -66,7 +83,7 @@ export interface PropertyData {
 
 export interface ProjectFile {
   id: number; project_id: number; filename: string; mime: string | null; size: number; doc_type: string | null; stage: string | null;
-  doc_date: string | null; counterparty: string | null; amount: number | null; source: string; uploaded_at: string;
+  doc_date: string | null; counterparty: string | null; amount: number | null; source: string; uploaded_by: string | null; uploaded_at: string;
 }
 
 export interface BudgetLine { id: number; project_id: number; category: string; planned_amount: number; note: string | null }
@@ -93,8 +110,12 @@ export interface DashboardSummary {
   leads: number; active: number; portfolio: number; total: number; total_invested: number; total_budget: number; expected_profit: number; over_budget_count: number;
 }
 
+function actorHeader(): Record<string, string> {
+  try { return { 'X-Actor': encodeURIComponent(localStorage.getItem('actor') || '负责人') }; } catch { return {}; }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, ...init });
+  const res = await fetch(path, { headers: { ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...actorHeader() }, ...init });
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try { const j = await res.json(); if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch { /* ignore */ }
@@ -140,4 +161,8 @@ export const api = {
   patchAnalysis: (aid: number, body: { name?: string; inputs?: Analysis['inputs']; is_current?: boolean }) => req<Analysis>(`/api/analyses/${aid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteAnalysis: (aid: number) => req<void>(`/api/analyses/${aid}`, { method: 'DELETE' }),
   applyAnalysis: (aid: number, body: { mode: 'replace' | 'append'; apply_prices: boolean }) => req<Project>(`/api/analyses/${aid}/apply`, { method: 'POST', body: JSON.stringify(body) }),
+  steps: (id: number) => req<Steps>(`/api/projects/${id}/steps`),
+  toggleStep: (id: number, key: string, body: { done: boolean; note?: string | null }) => req<Steps>(`/api/projects/${id}/steps/${key}`, { method: 'POST', body: JSON.stringify(body) }),
+  updates: (limit = 30) => req<Update[]>(`/api/updates?limit=${limit}`),
+  projectUpdates: (id: number, limit = 30) => req<Update[]>(`/api/projects/${id}/updates?limit=${limit}`),
 };

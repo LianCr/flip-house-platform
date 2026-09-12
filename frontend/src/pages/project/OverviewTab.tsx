@@ -8,21 +8,27 @@ import Header from '@cloudscape-design/components/header';
 import KeyValuePairs from '@cloudscape-design/components/key-value-pairs';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Textarea from '@cloudscape-design/components/textarea';
-import LifecycleStrip from '../../components/LifecycleStrip';
+import { useNavigate } from 'react-router-dom';
+import StepsPanel from '../../components/StepsPanel';
+import UpdatesList from '../../components/UpdatesList';
+import OwnerTag from '../../components/OwnerTag';
 import { BulletList, Meter, compactMoney } from '../../components/charts';
 import StatusBadge from '../../components/StatusBadge';
-import { api, BudgetSummary, Project } from '../../api/client';
+import { api, BudgetSummary, Project, Update } from '../../api/client';
 import { useFlash } from '../../lib/flash';
 import { dateStr, money, num, pct, text } from '../../lib/format';
 import ReviewTag from '../../components/ReviewTag';
 
 export default function OverviewTab({ project, reload }: { project: Project; reload: () => Promise<any> }) {
   const flash = useFlash();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
+  const [updates, setUpdates] = useState<Update[]>([]);
   const [risks, setRisks] = useState(project.risks ?? '');
   const [savingRisks, setSavingRisks] = useState(false);
 
   useEffect(() => { api.budgetSummary(project.id).then(setSummary); }, [project.id, project.updated_at]);
+  useEffect(() => { api.projectUpdates(project.id, 12).then(setUpdates).catch(() => setUpdates([])); }, [project.id, project.updated_at]);
   useEffect(() => { setRisks(project.risks ?? ''); }, [project.risks]);
 
   const cost = Math.max(project.budget_planned, project.budget_spent);
@@ -43,8 +49,8 @@ export default function OverviewTab({ project, reload }: { project: Project; rel
           以下关键字段还没有值：{project.missing_fields.join('、')}。可在“数据”页或“编辑”中补充。
         </Alert>
       )}
-      <Container header={<Header variant="h2" description="走到哪、走了多久、下一步是什么。"><ReviewTag id="B" />生命周期</Header>}>
-        <LifecycleStrip project={project} />
+      <Container header={<Header variant="h2" description="按负责人写的六个阶段。蓝圆标是谁负责；有文件或日期做证据的自动打勾，其余谁做完谁勾。"><ReviewTag id="B" />现在到哪一步</Header>}>
+        <StepsPanel projectId={project.id} onChanged={() => { reload(); api.projectUpdates(project.id, 12).then(setUpdates).catch(() => undefined); }} />
       </Container>
 
       <Grid gridDefinition={[{ colspan: { default: 12, m: 6 } }, { colspan: { default: 12, m: 6 } }]}>
@@ -69,7 +75,7 @@ export default function OverviewTab({ project, reload }: { project: Project; rel
             ]}
           />
         </Container>
-        <Container header={<Header variant="h2" description={summary?.planned_total ? (overCats ? `灰底是预算，彩条是实际支出，红段是超出。${overCats} 个类别超支。` : '灰底是预算，彩条是实际支出，目前没有类别超支。') : '还没有预算项。'}><ReviewTag id="D" />预算：花在哪、哪超了</Header>}>
+        <Container header={<Header variant="h2" description={summary?.planned_total ? (overCats ? `灰底是预算，彩条是实际支出，红段是超出。${overCats} 个类别超支。` : '灰底是预算，彩条是实际支出，目前没有类别超支。') : '还没有预算项。'}><ReviewTag id="D" /><OwnerTag block="overview.budget" />预算：花在哪、哪超了</Header>}>
           <SpaceBetween size="l">
             {summary && summary.planned_total > 0 && (
               <Meter value={summary.spent_total} max={summary.planned_total} label="总预算已用" reading={`${compactMoney(summary.spent_total)} / ${compactMoney(summary.planned_total)}`} targetLabel="预算" note={summary.remaining >= 0 ? `剩余 ${compactMoney(summary.remaining)}` : `已超支 ${compactMoney(-summary.remaining)}`} />
@@ -80,7 +86,7 @@ export default function OverviewTab({ project, reload }: { project: Project; rel
       </Grid>
 
       <Grid gridDefinition={[{ colspan: { default: 12, m: 6 } }, { colspan: { default: 12, m: 6 } }]}>
-        <Container header={<Header variant="h2"><ReviewTag id="E" />状态</Header>}>
+        <Container header={<Header variant="h2"><ReviewTag id="E" /><OwnerTag block="overview.status" />状态</Header>}>
           <SpaceBetween size="s">
             <StatusBadge status={project.status} />
             <Box color="text-body-secondary">{project.status_reason}</Box>
@@ -88,16 +94,19 @@ export default function OverviewTab({ project, reload }: { project: Project; rel
           </SpaceBetween>
         </Container>
         <Container
-          header={<Header variant="h2" actions={<Button loading={savingRisks} disabled={risks === (project.risks ?? '')} onClick={async () => { setSavingRisks(true); try { await api.patchProject(project.id, { risks: risks || null }); await reload(); flash({ type: 'success', content: '风险已保存' }); } finally { setSavingRisks(false); } }}>保存</Button>}><ReviewTag id="F" />风险</Header>}
+          header={<Header variant="h2" actions={<Button loading={savingRisks} disabled={risks === (project.risks ?? '')} onClick={async () => { setSavingRisks(true); try { await api.patchProject(project.id, { risks: risks || null }); await reload(); flash({ type: 'success', content: '风险已保存' }); } finally { setSavingRisks(false); } }}>保存</Button>}><ReviewTag id="F" /><OwnerTag block="overview.risks" />风险</Header>}
         >
           <Textarea value={risks} rows={4} placeholder="记录已知风险，例如地基、屋顶、许可证问题。" onChange={({ detail }) => setRisks(detail.value)} />
         </Container>
       </Grid>
       {project.notes && (
-        <Container header={<Header variant="h2"><ReviewTag id="G" />备注</Header>}>
+        <Container header={<Header variant="h2"><ReviewTag id="G" /><OwnerTag block="overview.notes" />备注</Header>}>
           <Box>{text(project.notes)}</Box>
         </Container>
       )}
+      <Container header={<Header variant="h2" counter={`(${updates.length})`} description="谁上传了文件、改了数据、记了支出、勾了清单，都在这里。"><ReviewTag id="H" /><OwnerTag block="overview.updates" />最近更新</Header>}>
+        <UpdatesList items={updates} onGo={(href) => navigate(href)} />
+      </Container>
     </SpaceBetween>
   );
 }

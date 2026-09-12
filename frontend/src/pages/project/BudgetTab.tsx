@@ -16,6 +16,7 @@ import { useFlash } from '../../lib/flash';
 import { dateStr, money, pct, text } from '../../lib/format';
 import { useMeta } from '../../lib/meta';
 import ReviewTag from '../../components/ReviewTag';
+import OwnerTag from '../../components/OwnerTag';
 import { DeltaBadge, InlineBar, Meter, StatTile, compactMoney } from '../../components/charts';
 
 export default function BudgetTab({ projectId, reload }: { projectId: number; reload: () => Promise<any> }) {
@@ -50,7 +51,7 @@ export default function BudgetTab({ projectId, reload }: { projectId: number; re
 
   return (
     <SpaceBetween size="l">
-      <Container header={<Header variant="h2"><ReviewTag id="A" />汇总</Header>}>
+      <Container header={<Header variant="h2"><ReviewTag id="A" /><OwnerTag block="budget.summary" />汇总</Header>}>
         <SpaceBetween size="m">
           <ColumnLayout columns={4} variant="text-grid">
             <StatTile label="总预算" value={compactMoney(summary?.planned_total)} sub={`${lines.length} 个预算项`} />
@@ -65,7 +66,7 @@ export default function BudgetTab({ projectId, reload }: { projectId: number; re
       </Container>
 
       <Table
-        header={<Header variant="h2" counter={`(${summary?.categories.length ?? 0})`} description="按类别对比计划与实际。"><ReviewTag id="B" />预算 vs 实际</Header>}
+        header={<Header variant="h2" counter={`(${summary?.categories.length ?? 0})`} description="按类别对比计划与实际。"><ReviewTag id="B" /><OwnerTag block="budget.summary" />预算 vs 实际</Header>}
         items={summary?.categories ?? []}
         empty={<Box textAlign="center" color="inherit"><b>还没有预算或支出</b></Box>}
         columnDefinitions={[
@@ -81,7 +82,7 @@ export default function BudgetTab({ projectId, reload }: { projectId: number; re
 
       <ColumnLayout columns={2}>
         <Table
-          header={<Header variant="h2" counter={`(${lines.length})`} actions={<Button onClick={() => setLineModal(true)}>添加预算项</Button>}><ReviewTag id="C" />预算项</Header>}
+          header={<Header variant="h2" counter={`(${lines.length})`} actions={<Button onClick={() => setLineModal(true)}>添加预算项</Button>}><ReviewTag id="C" /><OwnerTag block="budget.lines" />预算项</Header>}
           items={lines}
           empty={<Box textAlign="center" color="inherit"><b>还没有预算项</b></Box>}
           columnDefinitions={[
@@ -91,7 +92,7 @@ export default function BudgetTab({ projectId, reload }: { projectId: number; re
           ]}
         />
         <Table
-          header={<Header variant="h2" counter={`(${expenses.length})`} actions={<Button onClick={() => setExpModal(true)}>记一笔支出</Button>}><ReviewTag id="D" />支出</Header>}
+          header={<Header variant="h2" counter={`(${expenses.length})`} actions={<Button onClick={() => setExpModal(true)}>记一笔支出</Button>}><ReviewTag id="D" /><OwnerTag block="budget.expenses" />支出</Header>}
           items={expenses}
           empty={<Box textAlign="center" color="inherit"><b>还没有支出</b></Box>}
           columnDefinitions={[

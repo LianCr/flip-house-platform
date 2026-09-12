@@ -18,6 +18,7 @@ import StatusBadge from '../../components/StatusBadge';
 import CoverImage from '../../components/CoverImage';
 import WorkflowCards from '../../components/WorkflowCards';
 import ReviewTag from '../../components/ReviewTag';
+import OwnerTag from '../../components/OwnerTag';
 import { Meter } from '../../components/charts';
 import { api, Project } from '../../api/client';
 import { useFlash } from '../../lib/flash';
@@ -126,8 +127,9 @@ export default function ProjectPage() {
               >
                 <SpaceBetween direction="horizontal" size="xs" alignItems="center">
                   <ReviewTag id="A" />
+                  <OwnerTag block="project.header" />
                   <span>{project.name}</span>
-                  <Badge color={STAGE_COLOR[project.stage] ?? 'grey'}>{labelOf(meta?.stages, project.stage)} · {labelOf(meta?.substages[project.stage], project.substage)}</Badge>
+                  <Badge color={STAGE_COLOR[project.stage] ?? 'grey'}>{project.current_stage?.label ?? `${labelOf(meta?.stages, project.stage)} · ${labelOf(meta?.substages[project.stage], project.substage)}`}</Badge>
                   <Badge color="grey">{labelOf(meta?.strategies, project.strategy)}</Badge>
                   <StatusBadge status={project.status} />
                 </SpaceBetween>

@@ -12,6 +12,8 @@ import AssistantPanel from './components/AssistantPanel';
 import { api, AddressCandidate } from './api/client';
 import { FlashContext } from './lib/flash';
 import { ReviewContext } from './components/ReviewTag';
+import { ActorContext, getActor, setActor as persistActor } from './lib/actor';
+import { useMeta } from './lib/meta';
 
 export default function App() {
   const navigate = useNavigate();
@@ -22,6 +24,9 @@ export default function App() {
   const [q, setQ] = useState('');
   const [cands, setCands] = useState<AddressCandidate[]>([]);
   const [searching, setSearching] = useState(false);
+  const meta = useMeta();
+  const [actor, setActorState] = useState<string>(getActor);
+  const setActor = (c: string) => { persistActor(c); setActorState(c); };
   const [reviewOn, setReviewOn] = useState<boolean>(() => { try { return localStorage.getItem('reviewTags') !== 'off'; } catch { return true; } });
   const toggleReview = () => { const v = !reviewOn; setReviewOn(v); try { localStorage.setItem('reviewTags', v ? 'on' : 'off'); } catch { /* ignore */ } };
 
@@ -36,6 +41,7 @@ export default function App() {
   return (
     <FlashContext.Provider value={pushFlash}>
     <ReviewContext.Provider value={reviewOn}>
+    <ActorContext.Provider value={{ actor, setActor }}>
       <div id="top-nav" style={{ position: 'sticky', top: 0, zIndex: 1002 }}>
         <TopNavigation
           identity={{ href: '/', title: '翻新项目平台', onFollow: (e) => { e.preventDefault(); navigate('/'); } }}
@@ -66,7 +72,11 @@ export default function App() {
           utilities={[
             { type: 'button', text: '新建项目', iconName: 'add-plus', onClick: () => navigate('/projects/new') },
             { type: 'button', text: `评审标注：${reviewOn ? '开' : '关'}`, iconName: reviewOn ? 'status-positive' : 'status-stopped', onClick: toggleReview },
-            { type: 'menu-dropdown', text: '演示账户', iconName: 'user-profile', items: [{ id: 'settings', text: '设置' }, { id: 'signout', text: '退出' }] },
+            {
+              type: 'menu-dropdown', text: `我是：${actor}`, iconName: 'user-profile', title: '切换身份：谁在填，就选谁',
+              items: (meta?.people ?? [{ code: '负责人', label: '负责人', role: '' }]).map((p) => ({ id: p.code, text: p.label, description: p.role || undefined })),
+              onItemClick: ({ detail }) => setActor(detail.id),
+            },
           ]}
         />
       </div>
@@ -112,6 +122,7 @@ export default function App() {
           </Routes>
         }
       />
+    </ActorContext.Provider>
     </ReviewContext.Provider>
     </FlashContext.Provider>
   );

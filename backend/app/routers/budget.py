@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
+from .common import get_actor, log_update
 
 router = APIRouter(prefix="/api", tags=["budget"])
 
@@ -19,10 +20,11 @@ def list_lines(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/projects/{project_id}/budget-lines", response_model=schemas.BudgetLineOut, status_code=201)
-def add_line(project_id: int, body: schemas.BudgetLineIn, db: Session = Depends(get_db)):
+def add_line(project_id: int, body: schemas.BudgetLineIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     _check(db, project_id)
     rec = models.BudgetLine(project_id=project_id, **body.model_dump())
     db.add(rec)
+    log_update(db, project_id, actor, "budget", f"加了预算项“{rec.category}” ${rec.planned_amount:,.0f}")
     db.commit()
     db.refresh(rec)
     return rec
@@ -44,10 +46,11 @@ def list_expenses(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/projects/{project_id}/expenses", response_model=schemas.ExpenseOut, status_code=201)
-def add_expense(project_id: int, body: schemas.ExpenseIn, db: Session = Depends(get_db)):
+def add_expense(project_id: int, body: schemas.ExpenseIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     _check(db, project_id)
     rec = models.Expense(project_id=project_id, **body.model_dump())
     db.add(rec)
+    log_update(db, project_id, actor, "expense", f"记了一笔“{rec.category}”支出 ${rec.amount:,.0f}{'（' + rec.vendor + '）' if rec.vendor else ''}")
     db.commit()
     db.refresh(rec)
     return rec

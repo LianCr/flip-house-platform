@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from .common import project_out, set_field_with_source
+from .common import get_actor, log_update, project_out, set_field_with_source
+
+DATE_LABEL = {"purchase_price": "买入价", "target_arv": "目标售价", "purchase_date": "买入日期", "construction_start": "开工日期",
+              "construction_end": "计划完工", "list_date": "挂牌日期", "sale_date": "成交日期", "sale_price": "成交价",
+              "stage": "阶段", "substage": "子阶段", "risks": "风险", "notes": "备注", "name": "项目名", "status_override": "状态覆盖"}
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -31,7 +35,7 @@ def list_projects(stage: Optional[str] = None, q: Optional[str] = None, db: Sess
 
 
 @router.post("", response_model=schemas.ProjectOut, status_code=201)
-def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db)):
+def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     prop = None
     if body.reuse_property_id:
         prop = db.get(models.Property, body.reuse_property_id)
@@ -66,6 +70,7 @@ def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db)):
     if body.create_analysis:
         from .analyses import create_analysis
         create_analysis(db, project, None, None)
+    log_update(db, project.id, actor, "project", f"新建了项目：{project.name}")
     db.commit()
     db.refresh(project)
     return project_out(db, project)
@@ -77,15 +82,18 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{project_id}", response_model=schemas.ProjectOut)
-def patch_project(project_id: int, body: schemas.ProjectPatch, db: Session = Depends(get_db)):
+def patch_project(project_id: int, body: schemas.ProjectPatch, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     p = _get(db, project_id)
     data = body.model_dump(exclude_unset=True)
     clear = data.pop("clear_status_override", False)
+    changed = [DATE_LABEL.get(k, k) for k, v in data.items() if getattr(p, k) != v]
     for k, v in data.items():
         setattr(p, k, v)
     if clear:
         p.status_override = None
         p.status_override_reason = None
+    if changed:
+        log_update(db, project_id, actor, "project", f"修改了{'、'.join(changed[:4])}{'等' if len(changed) > 4 else ''}")
     db.commit()
     db.refresh(p)
     return project_out(db, p)

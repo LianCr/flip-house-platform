@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .analysis import build_prefill, full_outputs
 from .db import SessionLocal, UPLOAD_DIR, init_db
+from .dictionaries import FILE_DEFAULT_OWNER
 from .providers.mock import BUILTIN, MockProvider
 from .routers.common import set_field_with_source
 
@@ -26,6 +27,10 @@ VENDORS = {
 }
 
 T = date.today()
+
+from .dictionaries import FILE_TYPES, STAGE_CHECKLIST  # noqa: E402
+FILE_LABEL = {t["value"]: t["label"] for t in FILE_TYPES}
+STEP_TITLE = {it["key"]: it["title"] for st in STAGE_CHECKLIST for it in st["items"]}
 
 
 def d(days: int) -> str:
@@ -86,17 +91,32 @@ def _expenses(db: Session, pid: int, rnd: random.Random, spent: dict[str, float]
 
 
 def _file(db: Session, pid: int, name: str, doc_type: str, stage: str, doc_date: str,
-          counterparty: str | None = None, amount: float | None = None, source: str = "lark", mime: str = "application/pdf"):
+          counterparty: str | None = None, amount: float | None = None, source: str = "lark", mime: str = "application/pdf",
+          uploaded_by: str | None = None):
     folder = UPLOAD_DIR / str(pid)
     folder.mkdir(parents=True, exist_ok=True)
+    who = uploaded_by or FILE_DEFAULT_OWNER.get(doc_type, "负责人")
     rec = models.ProjectFile(project_id=pid, filename=name, stored_path="", mime=mime, doc_type=doc_type, stage=stage,
-                             doc_date=doc_date, counterparty=counterparty, amount=amount, source=source)
+                             doc_date=doc_date, counterparty=counterparty, amount=amount, source=source, uploaded_by=who)
     db.add(rec)
     db.flush()
     path = folder / f"{rec.id}_{name}"
     path.write_bytes(TINY_PDF)
     rec.stored_path = str(path)
     rec.size = len(TINY_PDF)
+    db.add(models.ProjectUpdate(project_id=pid, actor=who, kind="file", text=f"上传了{FILE_LABEL.get(doc_type, '文件')}：{name}",
+                                created_at=f"{doc_date}T09:{rnd_minute(name):02d}:00"))
+
+
+def rnd_minute(seed_text: str) -> int:
+    return sum(ord(c) for c in seed_text) % 60
+
+
+def _step(db: Session, pid: int, key: str, who: str, days_ago: int, note: str | None = None) -> None:
+    """手动打勾的清单项 + 一条更新记录。"""
+    when = f"{d(-days_ago)}T10:{rnd_minute(key + str(pid)):02d}:00"
+    db.add(models.ProjectStep(project_id=pid, key=key, done=True, done_by=who, done_at=when, note=note))
+    db.add(models.ProjectUpdate(project_id=pid, actor=who, kind="step", text=f"完成了“{STEP_TITLE[key]}”" + (f"：{note}" if note else ""), created_at=when))
 
 
 def _analysis(db: Session, pr: models.Project, prop: models.Property, val: dict, name: str, *, tier: str,
@@ -146,6 +166,11 @@ def seed(db: Session) -> None:
     _file(db, pr1.id, "屋顶发票_Apex_1.pdf", "invoice", "施工", d(-30), "Apex Roofing", 13500)
     _file(db, pr1.id, "厨房橱柜报价_HomeDepot.pdf", "invoice", "施工", d(-12), "Home Depot", 9800)
     _file(db, pr1.id, "施工保险凭证.pdf", "insurance", "通用", d(-58), "State Farm")
+    _file(db, pr1.id, "贷款文件_签署版.pdf", "loan_doc", "买入", d(-72), "Heartland Bank", uploaded_by="D")
+    _file(db, pr1.id, "设计方案_v2.pdf", "drawing", "施工", d(-64), uploaded_by="设计师")
+    _file(db, pr1.id, "框架检查_通过.pdf", "inspection_report", "施工", d(-20), "Platte County", uploaded_by="Z")
+    for k, who, ago in (("view", "L", 100), ("open_escrow", "负责人", 92), ("measure", "L", 68), ("utilities_on", "K", 60)):
+        _step(db, pr1.id, k, who, ago)
     _analysis(db, pr1, p1, v1, "买前分析", tier="medium", purchase=185000, sale=325000, months=5, current=True)
 
     # ===== 2. 在建 · 落后 · Parkville =====
@@ -167,6 +192,9 @@ def seed(db: Session) -> None:
     _file(db, pr2.id, "暖通合同_ComfortAir.pdf", "contractor_contract", "施工", d(-120), "Comfort Air", 12000)
     _file(db, pr2.id, "变更单_暖通管道改线.pdf", "change_order", "施工", d(-40), "Comfort Air", 1800)
     _file(db, pr2.id, "许可证复检通知.pdf", "permit", "施工", d(-18), "Platte County")
+    _file(db, pr2.id, "设计方案_终稿.pdf", "drawing", "施工", d(-140), uploaded_by="设计师")
+    for k, who, ago in (("view", "L", 175), ("open_escrow", "负责人", 168), ("measure", "L", 150), ("utilities_on", "K", 145), ("agent", "J", 30)):
+        _step(db, pr2.id, k, who, ago)
     _analysis(db, pr2, p2, v2, "买前分析", tier="medium", purchase=210000, sale=340000, months=4, current=True)
 
     # ===== 3. 在建 · 有风险（超支）· NE 43rd =====
@@ -187,6 +215,10 @@ def seed(db: Session) -> None:
     _file(db, pr3.id, "地基发票_1.pdf", "invoice", "施工", d(-45), "Foundation Masters", 18000)
     _file(db, pr3.id, "地基发票_2.pdf", "invoice", "施工", d(-15), "Foundation Masters", 13000)
     _file(db, pr3.id, "变更单_地基西侧加桩.pdf", "change_order", "施工", d(-30), "Foundation Masters", 12000)
+    _file(db, pr3.id, "设计方案_v1.pdf", "drawing", "施工", d(-85), uploaded_by="设计师")
+    _file(db, pr3.id, "地基检查_通过.pdf", "inspection_report", "施工", d(-25), "KC Building Dept", uploaded_by="Z")
+    for k, who, ago in (("view", "L", 115), ("open_escrow", "负责人", 108), ("measure", "L", 90), ("utilities_on", "K", 88)):
+        _step(db, pr3.id, k, who, ago)
     _analysis(db, pr3, p3, v3, "买前分析", tier="medium", purchase=142000, sale=255000, months=4, current=True)
 
     # ===== 4. 线索 · 热 · 待成交 · The Bat House =====
@@ -229,6 +261,13 @@ def seed(db: Session) -> None:
     _file(db, pr6.id, "挂牌协议_KW.pdf", "listing_agreement", "卖出", d(-160), "Keller Williams")
     _file(db, pr6.id, "成交结算单.pdf", "sale_closing", "卖出", d(-118), "Title Co.", 241000)
     _file(db, pr6.id, "项目利润报表.docx", "report", "通用", d(-110), mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    _file(db, pr6.id, "贷款文件.pdf", "loan_doc", "买入", d(-300), uploaded_by="D")
+    _file(db, pr6.id, "设计方案.pdf", "drawing", "施工", d(-290), uploaded_by="设计师")
+    _file(db, pr6.id, "终检_通过.pdf", "inspection_report", "施工", d(-170), "Clay County", uploaded_by="Z")
+    _file(db, pr6.id, "卖方披露.pdf", "seller_disclosure", "卖出", d(-150), uploaded_by="K")
+    for k, who, ago in (("view", "L", 330), ("open_escrow", "负责人", 322), ("measure", "L", 300), ("utilities_on", "K", 298), ("agent", "J", 200),
+                        ("final", "Z", 170), ("staging", "J", 165), ("mow", "A", 162), ("offer", "负责人", 150), ("sign", "D", 120), ("services_off", "K", 115)):
+        _step(db, pr6.id, k, who, ago)
     _analysis(db, pr6, p6, v6, "买前分析", tier="medium", purchase=128000, sale=235000, months=5, current=False)
     _analysis(db, pr6, p6, v6, "复盘：实际值", tier="medium", purchase=128000, sale=241000, months=6, current=True,
               overrides={"rehab_items": [{"category": c, "label": c, "amount": a, "note": "实际支出"} for c, a in

@@ -2,7 +2,7 @@ import { api, Project } from '../api/client';
 import { money } from './format';
 
 export type InsightLevel = 'error' | 'warning' | 'info';
-export type InsightTag = '超支' | '落后' | '临近完工' | '缺数据' | '缺文件' | '待定价' | '未算账';
+export type InsightTag = '超支' | '落后' | '临近完工' | '缺数据' | '缺文件' | '待定价' | '未算账' | '轮到';
 
 export interface Insight {
   level: InsightLevel;
@@ -62,6 +62,10 @@ export async function loadInsights(projects: Project[]): Promise<Insight[]> {
     if (p.stage === 'lead' && p.lead_heat === 'hot_lead' && p.target_arv == null) {
       out.push({ ...base, level: 'info', tag: '待定价', href: `/projects/${p.id}`, text: `${p.name} 是热线索，但还没定目标售价，出价前需要补上。` });
     }
+    if (p.stage === 'active' && p.next_up.length > 0) {
+      const n = p.next_up[0];
+      out.push({ ...base, level: 'info', tag: '轮到', href: `/projects/${p.id}`, text: `${p.name} 在${p.current_stage?.label ?? ''}，轮到 ${n.owners.join('、')}：${n.title}。` });
+    }
     if (p.missing_fields.length > 0) {
       out.push({ ...base, level: 'info', tag: '缺数据', href: `/projects/${p.id}?tab=data`, text: `${p.name} 还缺 ${p.missing_fields.length} 项关键数据：${p.missing_fields.slice(0, 3).join('、')}${p.missing_fields.length > 3 ? '…' : ''}。` });
     }
@@ -96,6 +100,7 @@ export function answer(question: string, insights: Insight[]): { text: string; i
   if (/缺|不完整|数据|字段/i.test(q)) return pick(['缺数据'], '所有项目的关键数据都齐了。', '有 {n} 个项目数据不完整：');
   if (/文件|许可|合同/i.test(q)) return pick(['缺文件'], '在建项目的许可证都已登记。', '有 {n} 个项目缺文件：');
   if (/线索|售价|出价|定价|算账|分析/i.test(q)) return pick(['待定价', '未算账'], '线索都已算过账并定了目标售价。', '有 {n} 条线索要先算账或定价：');
+  if (/轮到|谁做|下一步|该谁/i.test(q)) return pick(['轮到'], '在建的房子暂时没有等着谁做的事。', '有 {n} 套房在等人做事：');
   if (/关注|今天|重要|优先/i.test(q)) {
     const items = insights.filter((i) => i.level !== 'info');
     return { text: items.length ? `今天优先看这 ${items.length} 条：` : '今天没有需要紧急处理的事。', items };

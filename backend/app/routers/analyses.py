@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..analysis import build_prefill, full_outputs
 from ..db import get_db
+from .common import get_actor
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -113,9 +114,9 @@ def delete_analysis(aid: int, db: Session = Depends(get_db)):
 
 
 @router.post("/analyses/{aid}/apply", response_model=schemas.ProjectOut)
-def apply_analysis(aid: int, body: schemas.AnalysisApplyIn, db: Session = Depends(get_db)):
+def apply_analysis(aid: int, body: schemas.AnalysisApplyIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     """把分析结果写回项目：目标售价、买入价；装修明细按类别汇总成预算项。"""
-    from .common import project_out
+    from .common import log_update, project_out
 
     a = db.get(models.DealAnalysis, aid)
     if not a:
@@ -143,6 +144,7 @@ def apply_analysis(aid: int, body: schemas.AnalysisApplyIn, db: Session = Depend
 
     for other in p.analyses:
         other.is_current = other.id == a.id
+    log_update(db, p.id, actor, "analysis", f"把“{a.name}”应用到项目：目标售价 ${p.target_arv or 0:,.0f}，预算项 {len(by_cat)} 类")
     db.commit()
     db.refresh(p)
     return project_out(db, p)

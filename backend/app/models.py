@@ -179,6 +179,7 @@ class ProjectFile(Base):
     counterparty: Mapped[Optional[str]] = mapped_column(String)
     amount: Mapped[Optional[float]] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String, default="upload")
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String)  # 谁传的（人员代号）
     extracted_text: Mapped[Optional[str]] = mapped_column(Text)
     uploaded_at: Mapped[str] = mapped_column(String, default=now_iso)
 
@@ -195,3 +196,28 @@ class DealAnalysis(Base):
     is_current: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[str] = mapped_column(String, default=now_iso)
     updated_at: Mapped[str] = mapped_column(String, default=now_iso, onupdate=now_iso)
+
+
+class ProjectUpdate(Base):
+    """谁改了什么：每次有人上传、改字段、记支出、勾清单，都记一条，供负责人看。"""
+    __tablename__ = "project_updates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    actor: Mapped[str] = mapped_column(String, default="负责人")
+    kind: Mapped[str] = mapped_column(String)  # file / data / expense / budget / analysis / step / project
+    text: Mapped[str] = mapped_column(String)
+    created_at: Mapped[str] = mapped_column(String, default=now_iso, index=True)
+
+
+class ProjectStep(Base):
+    """阶段清单里手动打的勾（自动证据不存，读时算）。"""
+    __tablename__ = "project_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    key: Mapped[str] = mapped_column(String, index=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=True)
+    done_by: Mapped[Optional[str]] = mapped_column(String)
+    done_at: Mapped[Optional[str]] = mapped_column(String)
+    note: Mapped[Optional[str]] = mapped_column(String)

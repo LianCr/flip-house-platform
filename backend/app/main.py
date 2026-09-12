@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from . import models
 from .db import SessionLocal, init_db
-from .routers import analyses, budget, dashboard, files, lookup, meta, projects, property_data
+from .routers import analyses, budget, dashboard, files, lookup, meta, projects, property_data, steps
 
 
 @asynccontextmanager
@@ -31,7 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (meta, dashboard, lookup, projects, property_data, files, budget, analyses):
+for r in (meta, dashboard, lookup, projects, property_data, files, budget, analyses, steps):
     app.include_router(r.router)
 
 

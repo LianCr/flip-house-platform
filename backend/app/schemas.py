@@ -102,6 +102,8 @@ class ProjectOut(ORM):
     budget_used_pct: Optional[float] = None
     missing_fields: list[str] = []
     analysis_count: int = 0
+    current_stage: Optional[dict] = None
+    next_up: list[dict] = []
 
 
 class FieldIn(BaseModel):
@@ -238,10 +240,12 @@ class FileOut(ORM):
     counterparty: Optional[str] = None
     amount: Optional[float] = None
     source: str
+    uploaded_by: Optional[str] = None
     uploaded_at: str
 
 
 class FilePatch(BaseModel):
+    uploaded_by: Optional[str] = None
     doc_type: Optional[str] = None
     stage: Optional[str] = None
     doc_date: Optional[str] = None
@@ -355,3 +359,26 @@ class DashboardWidgets(BaseModel):
     weekly_spend: list[dict]
     vendors: list[dict]
     funnel: list[dict]
+
+
+# ---------- 更新记录与阶段清单 ----------
+class UpdateOut(ORM):
+    id: int
+    project_id: int
+    project_name: Optional[str] = None
+    actor: str
+    kind: str
+    text: str
+    created_at: str
+
+
+class StepToggleIn(BaseModel):
+    done: bool = True
+    note: Optional[str] = None
+
+
+class StepsOut(BaseModel):
+    stages: list[dict]
+    current_stage: dict
+    next_up: list[dict]
+    earlier_undone: list[dict] = []
