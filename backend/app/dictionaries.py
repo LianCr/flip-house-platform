@@ -154,7 +154,7 @@ def tier_of(code: str) -> str:
 # 动作 → 允许的级别或具体代号。没列的动作默认只有紫、蓝。
 PERMISSIONS = {
     "read_money":        ["purple", "blue"],          # 看买卖价、预算、利润、分析
-    "dashboard":         ["purple", "blue"],          # 完整工作台；青灰只有“我的待办”
+    "dashboard":         ["purple", "blue", "teal", "grey"],   # 人人能进工作台，看到的小组件按身份定（DASHBOARD_LAYOUTS）
     "create_project":    ["purple", "blue"],
     "delete_project":    ["purple", "负责人"],
     "edit_project":      ["purple", "blue"],          # 日期、阶段、风险、备注
@@ -320,6 +320,42 @@ INSPECTION_RESULTS = [
 MONEY_FIELDS = {"purchase_price", "target_arv", "sale_price"}
 MONEY_DOCS = {"purchase_contract", "closing_statement", "loan_doc", "invoice", "offer", "sale_docs", "sale_signed", "sale_closing"}
 
+# ---------------- 工作台：每个身份的默认小组件与顺序 ----------------
+# 老板、负责人最全；蓝的 L、PM 去掉钱类；青只有待办 + 和职位相关的一两个；灰只有待办。
+# 小组件 id 见前端 Dashboard.tsx 的 WIDGETS；新加的：boss 老板总览、gates 待我确认的门、mytodo 我的待办、
+# procurement 采购异常、site 施工现场、utilities 水电瓦斯与保险、permits permit 与检查、design 设计交付、saledocs 卖出文件
+_MONEY_WIDGETS = ["money", "capital", "stages", "funnel", "weekly", "retro", "vendors"]
+DASHBOARD_LAYOUTS = {
+    "老板":  ["boss", "attention", "gates", "turns", "updates", "upcoming", *_MONEY_WIDGETS, "procurement", "site", "saledocs", "recent", "list"],
+    "D":     ["gates", "attention", "turns", "site", "saledocs", "updates", "upcoming", *_MONEY_WIDGETS, "recent", "list"],
+    "J":     ["gates", "attention", "procurement", "turns", "saledocs", "updates", "upcoming", *_MONEY_WIDGETS, "recent", "list"],
+    "负责人": ["gates", "attention", "turns", "updates", "upcoming", "procurement", "site", "utilities", "permits", "design", "saledocs", *_MONEY_WIDGETS, "recent", "list"],
+    "L":     ["mytodo", "attention", "turns", "site", "updates", "upcoming", *_MONEY_WIDGETS, "recent", "list"],
+    "PM":    ["mytodo", "attention", "site", "permits", "procurement", "turns", "updates", "upcoming", "recent", "list"],
+    "K":     ["mytodo", "utilities", "attention", "saledocs", "upcoming", "updates", "recent", "list"],
+    "Z":     ["mytodo", "permits", "site", "attention", "upcoming", "updates", "recent", "list"],
+    "S":     ["mytodo", "saledocs", "recent", "list"],
+    "W":     ["mytodo", "saledocs", "recent", "list"],
+    "A":     ["mytodo", "recent", "list"],
+    "设计师": ["mytodo", "design", "recent", "list"],
+    "园丁":  ["mytodo"],
+    "承包商": ["mytodo"],
+}
+# 每个小组件谁能加：出现在谁的默认布局里谁就能加；老板和负责人什么都能加
+WIDGET_ACCESS: dict[str, list[str]] = {}
+for _role, _ids in DASHBOARD_LAYOUTS.items():
+    for _w in _ids:
+        WIDGET_ACCESS.setdefault(_w, [])
+        if _role not in WIDGET_ACCESS[_w]:
+            WIDGET_ACCESS[_w].append(_role)
+
+
+def widget_allowed(actor: str, widget: str) -> bool:
+    if actor in ("老板", "负责人"):
+        return True
+    return actor in WIDGET_ACCESS.get(widget, [])
+
+
 KEY_FIELDS_FOR_COMPLETENESS = [
     "year_built", "sqft", "beds", "baths_full", "lot_sqft", "apn",
 ]
@@ -343,6 +379,8 @@ def meta() -> dict:
         "file_default_owner": FILE_DEFAULT_OWNER,
         "stage_checklist": STAGE_CHECKLIST,
         "permit_rule": PERMIT_RULE,
+        "dashboard_layouts": DASHBOARD_LAYOUTS,
+        "widget_access": WIDGET_ACCESS,
         "utility_kinds": UTILITY_KINDS,
         "utility_statuses": UTILITY_STATUSES,
         "inspection_results": INSPECTION_RESULTS,

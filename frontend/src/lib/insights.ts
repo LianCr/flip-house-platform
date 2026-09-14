@@ -24,7 +24,20 @@ function daysUntil(iso: string | null): number | null {
 }
 
 /** 由规则从现有数据生成洞察。不是大模型，接入后升级为真实推理。 */
-export async function loadInsights(projects: Project[]): Promise<Insight[]> {
+const ROLE_TAGS: Record<string, InsightTag[]> = {
+  K: ['保险到期', '水电卡住'],
+  Z: ['等 permit', '检查没过'],
+  PM: ['检查没过', '落后', '临近完工', '等 permit'],
+  L: ['超支', '落后', '临近完工', '等 permit', '检查没过', '待定价', '未算账', '轮到', '缺数据'],
+};
+
+export async function loadInsights(projects: Project[], actor?: string): Promise<Insight[]> {
+  const all = await loadInsightsAll(projects);
+  const keep = actor ? ROLE_TAGS[actor] : undefined;
+  return keep ? all.filter((i) => keep.includes(i.tag)) : all;
+}
+
+async function loadInsightsAll(projects: Project[]): Promise<Insight[]> {
   const out: Insight[] = [];
   const active = projects.filter((p) => p.stage === 'active');
 

@@ -319,10 +319,24 @@ class DashboardSummary(BaseModel):
     active: int
     portfolio: int
     total: int
-    total_invested: float
-    total_budget: float
-    expected_profit: float
-    over_budget_count: int
+    total_invested: Optional[float] = None    # 看不到钱的身份为 None
+    total_budget: Optional[float] = None
+    expected_profit: Optional[float] = None
+    over_budget_count: Optional[int] = None
+    money_hidden: bool = False
+
+
+class DashboardRole(BaseModel):
+    """按身份给的专属小组件数据；没权限的块不返回（None）。"""
+    my_gates: Optional[list[dict]] = None
+    my_todo: Optional[list[dict]] = None
+    procurement_alerts: Optional[list[dict]] = None
+    site: Optional[list[dict]] = None
+    utilities_insurance: Optional[list[dict]] = None
+    permits: Optional[list[dict]] = None
+    design: Optional[list[dict]] = None
+    sale_docs: Optional[list[dict]] = None
+    boss: Optional[dict] = None
 
 
 # ---------- deal analysis ----------

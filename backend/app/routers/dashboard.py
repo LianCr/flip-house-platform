@@ -6,18 +6,15 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from ..dictionaries import SUBSTAGES
-from .common import budget_totals, get_actor, require
+from ..dictionaries import SUBSTAGES, widget_allowed
+from ..steps import compute_steps
+from .common import budget_totals, can_read_money, get_actor
 
-
-def _guard(actor: str = Depends(get_actor)) -> None:
-    require(actor, "dashboard", what="看完整工作台")
-
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(_guard)])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/summary", response_model=schemas.DashboardSummary)
-def summary(db: Session = Depends(get_db)):
+def summary(db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     projects = db.scalars(select(models.Project)).all()
     leads = sum(1 for p in projects if p.stage == "lead")
     active = sum(1 for p in projects if p.stage == "active")
@@ -36,6 +33,8 @@ def summary(db: Session = Depends(get_db)):
                 profit += p.target_arv - (p.purchase_price or 0) - max(planned, spent)
             if planned > 0 and spent > planned * 1.05:
                 over += 1
+    if not can_read_money(actor):
+        return schemas.DashboardSummary(leads=leads, active=active, portfolio=portfolio, total=len(projects), money_hidden=True)
     return schemas.DashboardSummary(
         leads=leads, active=active, portfolio=portfolio, total=len(projects),
         total_invested=invested, total_budget=budget, expected_profit=profit, over_budget_count=over,
@@ -47,8 +46,8 @@ DATE_KINDS = [("purchase_date", "买入"), ("construction_start", "开工"), ("c
 
 
 @router.get("/widgets", response_model=schemas.DashboardWidgets)
-def widgets(db: Session = Depends(get_db)):
-    """工作台小组件的数据：一次返回，全部来自现有表。"""
+def widgets(db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    """工作台小组件的数据：一次返回，全部来自现有表。看不到钱的身份，钱类块给空。"""
     today = date.today()
     projects = db.scalars(select(models.Project)).all()
     expenses = db.scalars(select(models.Expense)).all()
@@ -149,5 +148,164 @@ def widgets(db: Session = Depends(get_db)):
             counts[p.substage or "new_lead"] = counts.get(p.substage or "new_lead", 0) + 1
     funnel = [{"substage": s["value"], "label": s["label"], "count": counts.get(s["value"], 0)} for s in SUBSTAGES["lead"]]
 
+    if not can_read_money(actor):
+        capital, retrospectives, weekly_spend, vendors = [], [], [], []
     return schemas.DashboardWidgets(upcoming=upcoming, capital=capital, retrospectives=retrospectives,
                                     weekly_spend=weekly_spend, vendors=vendors, funnel=funnel)
+
+
+# ---------------- 按身份的专属块 ----------------
+_STATUS_BAD = {"failed"}
+
+
+def _brief(p: models.Project) -> dict:
+    return {"project_id": p.id, "project_name": p.name, "address": p.property.address_std, "stage": p.stage}
+
+
+@router.get("/role", response_model=schemas.DashboardRole)
+def role_widgets(db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    """一次返回这个身份能看的专属小组件数据。每块只在 widget_allowed 时计算。"""
+    today = date.today()
+    projects = db.scalars(select(models.Project).order_by(models.Project.updated_at.desc())).all()
+    hide = not can_read_money(actor)
+    out: dict = {}
+
+    need_steps = any(widget_allowed(actor, w) for w in ("gates", "mytodo"))
+    steps_by: dict[int, dict] = {}
+    if need_steps:
+        for p in projects:
+            steps_by[p.id] = compute_steps(db, p, hide_money=hide)
+
+    if widget_allowed(actor, "gates"):
+        gates = []
+        for p in projects:
+            st = steps_by[p.id]
+            cur_idx = len(st["stages"]) if st["current_stage"]["key"] == "done" else next((i for i, s in enumerate(st["stages"]) if s["key"] == st["current_stage"]["key"]), 0)
+            for si, stage in enumerate(st["stages"]):
+                if p.stage != "portfolio" and si > cur_idx:
+                    continue
+                for it in stage["items"]:
+                    overseer = actor in ("老板", "负责人")   # 盯的人看所有等确认的门
+                    if it["gate"] and not it["done"] and (overseer or (actor in it["confirm"] and actor not in it["confirmed"])):
+                        gates.append({**_brief(p), "key": it["key"], "title": it["title"], "stage": stage["label"],
+                                      "evidence_hint": it["evidence_hint"], "confirmed": it["confirmed"],
+                                      "waiting": [c for c in it["confirm"] if c not in it["confirmed"]], "is_current": si == cur_idx})
+        gates.sort(key=lambda g: (not g["is_current"], g["project_name"]))
+        out["my_gates"] = gates
+
+    if widget_allowed(actor, "mytodo"):
+        todo = []
+        for p in projects:
+            st = steps_by[p.id]
+            cur_idx = len(st["stages"]) if st["current_stage"]["key"] == "done" else next((i for i, s in enumerate(st["stages"]) if s["key"] == st["current_stage"]["key"]), 0)
+            for si, stage in enumerate(st["stages"]):
+                if p.stage != "portfolio" and si > cur_idx:
+                    continue
+                for it in stage["items"]:
+                    if it["done"]:
+                        continue
+                    mine_tick = actor in it["owners"]
+                    mine_confirm = actor in it["confirm"] and actor not in it["confirmed"]
+                    if mine_tick or mine_confirm:
+                        todo.append({"project": _brief(p), "stage": stage["label"], "item": it,
+                                     "is_current": (p.stage != "portfolio") and si == cur_idx,
+                                     "for_confirm": mine_confirm and (it["gate"] or not mine_tick)})
+        todo.sort(key=lambda r: (not r["is_current"], r["project"]["project_name"]))
+        out["my_todo"] = todo
+
+    active = [p for p in projects if p.stage == "active"]
+
+    if widget_allowed(actor, "procurement"):
+        rows = []
+        for p in active:
+            items = p.procurement_items
+            if not items:
+                continue
+            exc = [i.name for i in items if i.status == "exception"]
+            po = [i.name for i in items if i.status == "pending_order"]
+            spec = sum(1 for i in items if i.status == "pending_spec")
+            if exc or po:
+                rows.append({**_brief(p), "exception": exc, "pending_order": po, "pending_spec_count": spec})
+        out["procurement_alerts"] = rows
+
+    if widget_allowed(actor, "site"):
+        rows = []
+        for p in active:
+            photos = sorted([f for f in p.files if f.step_key == "progress" and (f.mime or "").startswith("image/")], key=lambda f: f.uploaded_at, reverse=True)[:3]
+            insp = sorted(p.inspections, key=lambda i: (i.date or "", i.id))
+            last = insp[-1] if insp else None
+            rows.append({**_brief(p), "photo_ids": [f.id for f in photos], "photo_count": len([f for f in p.files if f.step_key == "progress"]),
+                         "last_inspection": ({"name": last.name, "result": last.result, "date": last.date} if last else None),
+                         "failed": [i.name for i in insp if i.result == "failed"]})
+        out["site"] = rows
+
+    if widget_allowed(actor, "utilities"):
+        rows = []
+        for p in [x for x in projects if x.stage != "lead"]:
+            by = {u.kind: u for u in p.utilities}
+            ins = sorted([f for f in p.files if f.doc_type == "insurance"], key=lambda f: f.uploaded_at)
+            exp = ins[-1].expires_at if ins else None
+            days = None
+            if exp:
+                try:
+                    days = (date.fromisoformat(exp) - today).days
+                except ValueError:
+                    days = None
+            rows.append({**_brief(p), "water": by.get("water").status if by.get("water") else "not_started",
+                         "electric": by.get("electric").status if by.get("electric") else "not_started",
+                         "gas": by.get("gas").status if by.get("gas") else "not_started",
+                         "blocker": next((u.blocker for u in p.utilities if u.blocker), None),
+                         "insurance_expires": exp, "insurance_days": days})
+        out["utilities_insurance"] = rows
+
+    if widget_allowed(actor, "permits"):
+        rows = []
+        for p in active:
+            issued = any(f.doc_type == "permit" for f in p.files)
+            applied = sorted([f for f in p.files if f.doc_type == "permit_application"], key=lambda f: f.uploaded_at)
+            applied_days = None
+            if applied and not issued and applied[-1].doc_date:
+                try:
+                    applied_days = (today - date.fromisoformat(applied[-1].doc_date)).days
+                except ValueError:
+                    applied_days = None
+            insp = sorted(p.inspections, key=lambda i: (i.date or "", i.id))
+            nxt = next((i for i in insp if i.result == "scheduled"), None)
+            rows.append({**_brief(p), "permit": "issued" if issued else ("applied" if applied else "none"), "applied_days": applied_days,
+                         "next_inspection": ({"name": nxt.name, "date": nxt.date} if nxt else None),
+                         "failed": [i.name for i in insp if i.result == "failed"],
+                         "final_passed": any(i.is_final and i.result == "passed" for i in insp)})
+        out["permits"] = rows
+
+    if widget_allowed(actor, "design"):
+        rows = []
+        for p in [x for x in projects if x.stage != "portfolio"]:
+            types = {f.doc_type for f in p.files}
+            rows.append({**_brief(p), "drawing": "drawing" in types, "drawing_final": "drawing_final" in types, "measure_note": "measure_note" in types})
+        out["design"] = rows
+
+    if widget_allowed(actor, "saledocs"):
+        rows = []
+        for p in [x for x in projects if x.stage == "active" and x.substage == "listing" or (x.list_date and x.stage != "portfolio")]:
+            types = {f.doc_type for f in p.files}
+            rows.append({**_brief(p), "list_date": p.list_date, "offer": "offer" in types, "sale_docs": "sale_docs" in types,
+                         "disclosure": "seller_disclosure" in types, "sale_signed": "sale_signed" in types, "sale_closing": "sale_closing" in types})
+        out["sale_docs"] = rows
+
+    if widget_allowed(actor, "boss") and not hide:
+        invested = 0.0; expected = 0.0; realized = 0.0; over = 0
+        for p in projects:
+            planned, spent = budget_totals(db, p.id)
+            if p.stage == "active":
+                invested += (p.purchase_price or 0) + spent
+                if p.target_arv:
+                    expected += p.target_arv - (p.purchase_price or 0) - max(planned, spent)
+                if planned > 0 and spent > planned * 1.05:
+                    over += 1
+            elif p.stage == "portfolio" and p.sale_price:
+                realized += p.sale_price - (p.purchase_price or 0) - spent
+        out["boss"] = {"active": len(active), "leads": sum(1 for p in projects if p.stage == "lead"),
+                       "portfolio": sum(1 for p in projects if p.stage == "portfolio"),
+                       "total_invested": round(invested, 2), "expected_profit": round(expected, 2), "realized_profit": round(realized, 2), "over_budget_count": over}
+
+    return schemas.DashboardRole(**out)

@@ -115,8 +115,9 @@ export default function App() {
             activeHref={activeHref}
             onFollow={(e) => { if (!e.detail.external) { e.preventDefault(); navigate(e.detail.href); } }}
             items={[
-              { type: 'link', text: canDo('dashboard') ? '工作台' : '我的待办', href: '/' },
-              ...(canDo('dashboard') ? [{ type: 'link' as const, text: '项目', href: '/projects' }] : []),
+              { type: 'link', text: '工作台', href: '/' },
+              ...(canDo('read_money') ? [{ type: 'link' as const, text: '项目', href: '/projects' }] : []),
+              { type: 'link', text: '我的待办', href: '/todo' },
               ...(canDo('create_project') ? [{ type: 'link' as const, text: '新建项目', href: '/projects/new' }] : []),
               { type: 'divider' },
               { type: 'link', text: '接口文档', href: 'http://127.0.0.1:8000/docs', external: true },
@@ -125,11 +126,12 @@ export default function App() {
         }
         content={
           <Routes>
-            <Route path="/" element={canDo('dashboard') ? <Dashboard /> : <MyTodo />} />
-            <Route path="/projects" element={canDo('dashboard') ? <Dashboard listOnly /> : <MyTodo />} />
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/todo" element={<MyTodo />} />
+            <Route path="/projects" element={canDo('read_money') ? <Dashboard listOnly /> : <MyTodo />} />
             <Route path="/projects/new" element={<AddProject />} />
             <Route path="/projects/:id" element={<ProjectPage />} />
-            <Route path="*" element={canDo('dashboard') ? <Dashboard /> : <MyTodo />} />
+            <Route path="*" element={<Dashboard />} />
           </Routes>
         }
       />

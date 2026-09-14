@@ -20,6 +20,8 @@ export interface Meta {
   utility_kinds: Option[];
   utility_statuses: Option[];
   inspection_results: Option[];
+  dashboard_layouts: Record<string, string[]>;
+  widget_access: Record<string, string[]>;
   procurement_waves: Option[];
   procurement_statuses: Option[];
 }
@@ -140,7 +142,21 @@ export interface DashboardWidgets {
 }
 
 export interface DashboardSummary {
-  leads: number; active: number; portfolio: number; total: number; total_invested: number; total_budget: number; expected_profit: number; over_budget_count: number;
+  leads: number; active: number; portfolio: number; total: number; total_invested: number | null; total_budget: number | null; expected_profit: number | null; over_budget_count: number | null; money_hidden: boolean;
+}
+
+export interface ProjectBrief { project_id: number; project_name: string; address: string; stage: string }
+export interface TodoRow { project: ProjectBrief; stage: string; item: StepItem; is_current: boolean; for_confirm: boolean }
+export interface DashboardRole {
+  my_gates?: (ProjectBrief & { key: string; title: string; stage: string; evidence_hint: string | null; confirmed: string[]; waiting: string[]; is_current: boolean })[] | null;
+  my_todo?: TodoRow[] | null;
+  procurement_alerts?: (ProjectBrief & { exception: string[]; pending_order: string[]; pending_spec_count: number })[] | null;
+  site?: (ProjectBrief & { photo_ids: number[]; photo_count: number; last_inspection: { name: string; result: string; date: string | null } | null; failed: string[] })[] | null;
+  utilities_insurance?: (ProjectBrief & { water: string; electric: string; gas: string; blocker: string | null; insurance_expires: string | null; insurance_days: number | null })[] | null;
+  permits?: (ProjectBrief & { permit: 'none' | 'applied' | 'issued'; applied_days: number | null; next_inspection: { name: string; date: string | null } | null; failed: string[]; final_passed: boolean })[] | null;
+  design?: (ProjectBrief & { drawing: boolean; drawing_final: boolean; measure_note: boolean })[] | null;
+  sale_docs?: (ProjectBrief & { list_date: string | null; offer: boolean; sale_docs: boolean; disclosure: boolean; sale_signed: boolean; sale_closing: boolean })[] | null;
+  boss?: { active: number; leads: number; portfolio: number; total_invested: number; expected_profit: number; realized_profit: number; over_budget_count: number } | null;
 }
 
 function actorHeader(): Record<string, string> {
@@ -162,6 +178,7 @@ export const api = {
   meta: () => req<Meta>('/api/meta'),
   dashboard: () => req<DashboardSummary>('/api/dashboard/summary'),
   widgets: () => req<DashboardWidgets>('/api/dashboard/widgets'),
+  dashboardRole: () => req<DashboardRole>('/api/dashboard/role'),
   lookupAddress: (q: string) => req<AddressCandidate[]>(`/api/lookup/address?q=${encodeURIComponent(q)}`),
   lookupProperty: (address: string) => req<LookupResult>('/api/lookup/property', { method: 'POST', body: JSON.stringify({ address }) }),
   projects: (params?: { stage?: string; q?: string }) => {

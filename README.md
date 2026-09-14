@@ -175,3 +175,7 @@ CLAUDE.md                    产品研究框架与工作原则
 ## 第一批最小修复（2026-09-14 晚）
 
 按两份审计核实的 P0：`compute_steps` 的"全部完成"要求前段无遗留；总览 B 面板按顺序渲染每段所有大节点；`final` 门要求最近一次 `is_final` 检查 passed；青灰身份在 steps 证据 / updates 文本 / files.amount / 下载四处抹钱（`MONEY_FIELDS`、`MONEY_DOCS` 在 `dictionaries.py`）；房产字段写接口加 `require(edit_project)`；非 `upload_any` 的上传人强制为本人、PATCH 不能改类型 / 步骤 / 上传人；分析器 `amortize()` 拆利息与本金，权益倍数改为回收现金 ÷ 现金投入（前后端同改）。
+
+## 工作台按身份动态组合（2026-09-14）
+
+`DASHBOARD_LAYOUTS` / `WIDGET_ACCESS`（`dictionaries.py`）定每个身份的默认小组件；`GET /api/dashboard/role` 一次返回该身份能看的专属块（待我确认的门、我的待办、采购异常、施工现场、水电瓦斯与保险、permit 与检查、设计交付、卖出文件、老板总览），没权限的块不返回。`/summary` 与 `/widgets` 对看不到钱的身份给无钱版。前端 `Dashboard.tsx` 按 `meta.dashboard_layouts[actor]` 生成默认布局，存储键按身份分开；`MyTodoTable` 同时给待办页和小组件用。

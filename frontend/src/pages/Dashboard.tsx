@@ -26,14 +26,18 @@ import StatusBadge from '../components/StatusBadge';
 import CoverImage from '../components/CoverImage';
 import ReviewTag from '../components/ReviewTag';
 import { BulletList, DeltaBadge, HBars, InlineBar, Meter, StackedBar, StatTile, Trend, compactMoney, fullMoney } from '../components/charts';
-import { api, AddressCandidate, DashboardSummary, DashboardWidgets, Project, Update } from '../api/client';
+import { api, AddressCandidate, DashboardRole, DashboardSummary, DashboardWidgets, Project, Update } from '../api/client';
+import MyTodoTable from '../components/MyTodoTable';
+import { useRole } from '../lib/role';
+import { actionHref } from '../lib/stepActions';
 import UpdatesList from '../components/UpdatesList';
 import { OwnerDot } from '../components/OwnerTag';
 import { dateStr, money, pct } from '../lib/format';
 import { headline, Insight, loadInsights } from '../lib/insights';
 import { labelOf, useMeta } from '../lib/meta';
 
-type WidgetId = 'attention' | 'money' | 'stages' | 'recent' | 'list' | 'upcoming' | 'capital' | 'retro' | 'weekly' | 'vendors' | 'funnel' | 'updates' | 'turns';
+type WidgetId = 'attention' | 'money' | 'stages' | 'recent' | 'list' | 'upcoming' | 'capital' | 'retro' | 'weekly' | 'vendors' | 'funnel' | 'updates' | 'turns'
+  | 'gates' | 'mytodo' | 'procurement' | 'site' | 'utilities' | 'permits' | 'design' | 'saledocs' | 'boss';
 type ItemData = { title: string; tag: string };
 type Item = BoardProps.Item<ItemData>;
 
@@ -51,27 +55,37 @@ const WIDGETS: Record<WidgetId, ItemData & { cols: number; rows: number }> = {
   funnel: { title: '线索漏斗', tag: 'L', cols: 1, rows: 4 },
   updates: { title: '谁更新了什么', tag: 'M', cols: 2, rows: 4 },
   turns: { title: '每套房轮到谁', tag: 'N', cols: 4, rows: 7 },
+  gates: { title: '待我确认的门', tag: 'O', cols: 2, rows: 4 },
+  mytodo: { title: '我的待办', tag: 'P', cols: 4, rows: 6 },
+  procurement: { title: '采购异常与待下单', tag: 'Q', cols: 2, rows: 4 },
+  site: { title: '施工现场', tag: 'R', cols: 4, rows: 4 },
+  utilities: { title: '水电瓦斯与保险', tag: 'S', cols: 3, rows: 4 },
+  permits: { title: 'permit 与检查', tag: 'T', cols: 3, rows: 4 },
+  design: { title: '设计交付', tag: 'U', cols: 2, rows: 4 },
+  saledocs: { title: '卖出文件', tag: 'V', cols: 3, rows: 4 },
+  boss: { title: '老板总览', tag: 'W', cols: 4, rows: 2 },
 };
-const DEFAULT_ORDER: WidgetId[] = ['attention', 'turns'];
-const LAYOUT_KEY = 'boardLayout.v5';
+const MONEY_WIDGETS: WidgetId[] = ['money', 'capital', 'weekly', 'retro', 'vendors', 'boss'];
+const FALLBACK_ORDER: WidgetId[] = ['mytodo', 'recent', 'list'];
+const layoutKey = (actor: string) => `boardLayout.v6.${actor}`;
 
 function mkItem(id: WidgetId, extra?: Partial<Item>): Item {
   const w = WIDGETS[id];
   return { id, columnSpan: w.cols, rowSpan: w.rows, data: { title: w.title, tag: w.tag }, ...extra };
 }
-function loadLayout(): Item[] {
+function loadLayout(actor: string, defaults: WidgetId[]): Item[] {
   try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
+    const raw = localStorage.getItem(layoutKey(actor));
     if (raw) {
       const saved = JSON.parse(raw) as { id: WidgetId; columnSpan?: number; rowSpan?: number; columnOffset?: Record<number, number> }[];
       const items = saved.filter((s) => WIDGETS[s.id]).map((s) => mkItem(s.id, { columnSpan: s.columnSpan, rowSpan: s.rowSpan, columnOffset: s.columnOffset }));
       if (items.length) return items;
     }
   } catch { /* ignore */ }
-  return DEFAULT_ORDER.map((id) => mkItem(id));
+  return defaults.map((id) => mkItem(id));
 }
-function saveLayout(items: ReadonlyArray<Item>) {
-  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(items.map((i) => ({ id: i.id, columnSpan: i.columnSpan, rowSpan: i.rowSpan, columnOffset: i.columnOffset })))); } catch { /* ignore */ }
+function saveLayout(actor: string, items: ReadonlyArray<Item>) {
+  try { localStorage.setItem(layoutKey(actor), JSON.stringify(items.map((i) => ({ id: i.id, columnSpan: i.columnSpan, rowSpan: i.rowSpan, columnOffset: i.columnOffset })))); } catch { /* ignore */ }
 }
 
 const boardI18n: BoardProps.I18nStrings<ItemData> = {
@@ -96,24 +110,31 @@ const shortDate = (d: string) => d.slice(5).replace('-', '/');
 export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) {
   const navigate = useNavigate();
   const meta = useMeta();
+  const role = useRole();
+  const defaults = ((meta?.dashboard_layouts?.[role.actor] ?? (role.tier === 'purple' || role.actor === '负责人' ? meta?.dashboard_layouts?.['负责人'] : undefined)) ?? FALLBACK_ORDER).filter((id): id is WidgetId => id in WIDGETS);
+  const canAdd = (id: WidgetId) => (role.actor === '老板' || role.actor === '负责人' || (meta?.widget_access?.[id] ?? []).includes(role.actor)) && (!MONEY_WIDGETS.includes(id) || role.canReadMoney);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [roleData, setRoleData] = useState<DashboardRole | null>(null);
   const [widgets, setWidgets] = useState<DashboardWidgets | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [updates, setUpdates] = useState<Update[]>([]);
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<ReadonlyArray<Item>>(loadLayout);
+  const [items, setItems] = useState<ReadonlyArray<Item>>(() => loadLayout(role.actor, defaults));
   const [stage, setStage] = useState<{ label: string; value: string }>({ label: '全部阶段', value: '' });
   const [q, setQ] = useState('');
   const [cands, setCands] = useState<AddressCandidate[]>([]);
   const [searching, setSearching] = useState(false);
 
+  const reloadRole = async () => { setRoleData(await api.dashboardRole().catch(() => null)); };
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.dashboard(), api.projects(), api.widgets(), api.updates(20).catch(() => [] as Update[])])
-      .then(async ([s, p, w, u]) => { setSummary(s); setProjects(p); setWidgets(w); setUpdates(u); setInsights(await loadInsights(p)); })
+    setItems(loadLayout(role.actor, defaults));
+    Promise.all([api.dashboard(), api.projects(), api.widgets(), api.updates(20).catch(() => [] as Update[]), api.dashboardRole().catch(() => null)])
+      .then(async ([s, p, w, u, r]) => { setSummary(s); setProjects(p); setWidgets(w); setUpdates(u); setRoleData(r); setInsights(await loadInsights(p, role.actor)); })
       .finally(() => setLoading(false));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role.actor, meta]);
 
   const filtered = useMemo(() => (stage.value ? projects.filter((p) => p.stage === stage.value) : projects), [projects, stage]);
   const { items: rows, collectionProps, filterProps, paginationProps } = useCollection(filtered, {
@@ -357,6 +378,119 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
             ]} />
         );
       }
+      case 'gates': {
+        const gs = roleData?.my_gates ?? [];
+        return gs.length ? (
+          <SpaceBetween size="xs">
+            {gs.map((g) => (
+              <div key={`${g.project_id}-${g.key}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', padding: '8px 10px', borderRadius: 6, background: g.is_current ? '#f3f8ff' : '#f8f8f8', borderLeft: `4px solid ${g.is_current ? '#0972d3' : '#8d99a8'}` }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700 }}>◆ {g.title} <Box variant="span" fontWeight="normal" color="text-body-secondary">· {g.project_name}</Box></div>
+                  <Box variant="small" color="text-body-secondary">{g.stage}{g.evidence_hint ? ` · ${g.evidence_hint}` : ''}{g.confirmed.length ? ` · ${g.confirmed.join('、')} 已确认` : ''}</Box>
+                </div>
+                <Button onClick={() => go(`/projects/${g.project_id}?tab=overview&step=${g.key}&action=confirm`)}>去确认</Button>
+              </div>
+            ))}
+          </SpaceBetween>
+        ) : empty('没有等你确认的大节点。');
+      }
+      case 'mytodo':
+        return <MyTodoTable compact rows={roleData ? (roleData.my_todo ?? []) : null} onReload={reloadRole} />;
+      case 'procurement': {
+        const rs = roleData?.procurement_alerts ?? [];
+        return rs.length ? (
+          <SpaceBetween size="s">
+            {rs.map((r) => (
+              <div key={r.project_id}>
+                <Box fontWeight="bold">{projLink(r.project_id, r.project_name)} <Link href={`/projects/${r.project_id}?tab=budget&section=procurement`} onFollow={(e) => { e.preventDefault(); go(`/projects/${r.project_id}?tab=budget&section=procurement`); }} fontSize="body-s">管采购</Link></Box>
+                {r.exception.length > 0 && <Box fontSize="body-s"><StatusIndicator type="error">异常 {r.exception.length}</StatusIndicator> {r.exception.join('、')}</Box>}
+                {r.pending_order.length > 0 && <Box fontSize="body-s"><StatusIndicator type="warning">待下单 {r.pending_order.length}</StatusIndicator> {r.pending_order.slice(0, 5).join('、')}{r.pending_order.length > 5 ? '…' : ''}</Box>}
+                {r.pending_spec_count > 0 && <Box variant="small" color="text-body-secondary">还有 {r.pending_spec_count} 项待选型</Box>}
+              </div>
+            ))}
+          </SpaceBetween>
+        ) : empty('采购没有异常，也没有待下单的。');
+      }
+      case 'site': {
+        const rs = roleData?.site ?? [];
+        return rs.length ? (
+          <ColumnLayout columns={3} minColumnWidth={220}>
+            {rs.map((r) => (
+              <div key={r.project_id}>
+                <Box fontWeight="bold">{projLink(r.project_id, r.project_name)}</Box>
+                <div style={{ display: 'flex', gap: 4, margin: '6px 0' }}>
+                  {r.photo_ids.length ? r.photo_ids.map((id) => <img key={id} src={`/api/files/${id}/download`} alt="" style={{ width: 64, height: 48, objectFit: 'cover', borderRadius: 4, background: '#e9ecef' }} />) : <Box variant="small" color="text-body-secondary">还没有进度照片</Box>}
+                </div>
+                <Box variant="small" color="text-body-secondary">{r.photo_count} 张进度照片</Box>
+                {r.failed.length > 0 ? <StatusIndicator type="error">{r.failed.join('、')} 没过</StatusIndicator>
+                  : r.last_inspection ? <StatusIndicator type={r.last_inspection.result === 'passed' ? 'success' : 'pending'}>{r.last_inspection.name} · {r.last_inspection.result === 'passed' ? '通过' : '已约'}</StatusIndicator>
+                  : <Box variant="small" color="text-body-secondary">还没有检查</Box>}
+              </div>
+            ))}
+          </ColumnLayout>
+        ) : empty('没有在建项目');
+      }
+      case 'utilities': {
+        const rs = roleData?.utilities_insurance ?? [];
+        const dot = (st: string) => <span title={st} style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, marginRight: 4, background: st === 'on' ? '#037f0c' : st === 'pending' ? '#8d6605' : st === 'off' ? '#5f6b7a' : '#d1d5db' }} />;
+        return rs.length ? (
+          <Table variant="embedded" items={rs} columnDefinitions={[
+            { id: 'p', header: '房', cell: (r) => projLink(r.project_id, r.project_name) },
+            { id: 'u', header: '水 · 电 · 瓦斯', cell: (r) => <span>{dot(r.water)}{dot(r.electric)}{dot(r.gas)}{r.blocker && <Box variant="small" color="text-status-warning">{r.blocker}</Box>}</span> },
+            { id: 'i', header: '保险', cell: (r) => (r.insurance_days == null ? '—' : <StatusIndicator type={r.insurance_days < 0 ? 'error' : r.insurance_days <= 30 ? 'warning' : 'success'}>{r.insurance_days < 0 ? `过期 ${-r.insurance_days} 天` : `${r.insurance_days} 天后到期`}</StatusIndicator>) },
+            { id: 'a', header: '', cell: (r) => <Link href={`/projects/${r.project_id}?tab=data&section=utilities`} onFollow={(e) => { e.preventDefault(); go(`/projects/${r.project_id}?tab=data&section=utilities`); }}>去填</Link> },
+          ]} />
+        ) : empty('没有需要管水电的房子');
+      }
+      case 'permits': {
+        const rs = roleData?.permits ?? [];
+        return rs.length ? (
+          <Table variant="embedded" items={rs} columnDefinitions={[
+            { id: 'p', header: '房', cell: (r) => projLink(r.project_id, r.project_name) },
+            { id: 'pm', header: 'permit', cell: (r) => (r.permit === 'issued' ? <StatusIndicator type="success">已核发</StatusIndicator> : r.permit === 'applied' ? <StatusIndicator type="in-progress">已申请{r.applied_days != null ? ` ${r.applied_days} 天` : ''}</StatusIndicator> : <StatusIndicator type="pending">没申请</StatusIndicator>) },
+            { id: 'n', header: '下一次检查', cell: (r) => (r.final_passed ? <StatusIndicator type="success">final 已过</StatusIndicator> : r.next_inspection ? `${r.next_inspection.name}${r.next_inspection.date ? ` · ${shortDate(r.next_inspection.date)}` : ''}` : '—') },
+            { id: 'f', header: '没过', cell: (r) => (r.failed.length ? <StatusIndicator type="error">{r.failed.join('、')}</StatusIndicator> : '—') },
+          ]} />
+        ) : empty('没有在建项目');
+      }
+      case 'design': {
+        const rs = roleData?.design ?? [];
+        const ok = (b: boolean) => <StatusIndicator type={b ? 'success' : 'pending'}>{b ? '已交' : '没交'}</StatusIndicator>;
+        return rs.length ? (
+          <Table variant="embedded" items={rs} columnDefinitions={[
+            { id: 'p', header: '房', cell: (r) => projLink(r.project_id, r.project_name) },
+            { id: 'm', header: '量尺记录', cell: (r) => ok(r.measure_note) },
+            { id: 'd', header: '设计方案', cell: (r) => ok(r.drawing) },
+            { id: 'f', header: '定稿图纸', cell: (r) => ok(r.drawing_final) },
+          ]} />
+        ) : empty('没有在进行的房子');
+      }
+      case 'saledocs': {
+        const rs = roleData?.sale_docs ?? [];
+        const ok = (b: boolean) => <span style={{ color: b ? '#037f0c' : '#8d99a8', fontWeight: 700 }}>{b ? '✓' : '○'}</span>;
+        return rs.length ? (
+          <Table variant="embedded" items={rs} columnDefinitions={[
+            { id: 'p', header: '房', cell: (r) => <span>{projLink(r.project_id, r.project_name)}<Box variant="small" color="text-body-secondary">挂牌 {r.list_date ? shortDate(r.list_date) : '—'}</Box></span> },
+            { id: 'o', header: 'offer', cell: (r) => ok(r.offer) },
+            { id: 's', header: '文件包', cell: (r) => ok(r.sale_docs) },
+            { id: 'd', header: '披露', cell: (r) => ok(r.disclosure) },
+            { id: 'g', header: '签署版', cell: (r) => ok(r.sale_signed) },
+            { id: 'c', header: '结算单', cell: (r) => ok(r.sale_closing) },
+          ]} />
+        ) : empty('没有在售的房子');
+      }
+      case 'boss': {
+        const b = roleData?.boss;
+        return b ? (
+          <ColumnLayout columns={5} variant="text-grid">
+            <StatTile label="在手" value={`${b.active + b.leads}`} sub={`${b.active} 在建 · ${b.leads} 线索`} />
+            <StatTile label="总投入" value={compactMoney(b.total_invested)} sub="在建买入价 + 已支出" />
+            <StatTile label="预计利润" value={compactMoney(b.expected_profit)} sub="在建" />
+            <StatTile label="已实现利润" value={compactMoney(b.realized_profit)} sub={`${b.portfolio} 套已售`} />
+            <StatTile label="超预算" value={`${b.over_budget_count}`} sub="套" tone={b.over_budget_count > 0 ? 'bad' : undefined} />
+          </ColumnLayout>
+        ) : empty('没有数据');
+      }
       case 'funnel': {
         const fs = widgets?.funnel ?? [];
         return fs.length ? (
@@ -366,7 +500,7 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
     }
   };
 
-  const hidden = (Object.keys(WIDGETS) as WidgetId[]).filter((id) => !items.some((i) => i.id === id));
+  const hidden = (Object.keys(WIDGETS) as WidgetId[]).filter((id) => !items.some((i) => i.id === id) && canAdd(id));
 
   return (
     <ContentLayout
@@ -379,9 +513,9 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
             <SpaceBetween direction="horizontal" size="xs">
               <ButtonDropdown
                 items={hidden.length ? hidden.map((id) => ({ id, text: `${WIDGETS[id].tag} · ${WIDGETS[id].title}` })) : [{ id: 'none', text: '所有小组件都在看板上', disabled: true }]}
-                onItemClick={({ detail }) => { if (detail.id !== 'none') { const next = [...items, mkItem(detail.id as WidgetId)]; setItems(next); saveLayout(next); } }}
+                onItemClick={({ detail }) => { if (detail.id !== 'none') { const next = [...items, mkItem(detail.id as WidgetId)]; setItems(next); saveLayout(role.actor, next); } }}
               >添加小组件</ButtonDropdown>
-              <Button variant="primary" onClick={() => go('/projects/new')}>新建项目</Button>
+              {role.can('create_project') && <Button variant="primary" onClick={() => go('/projects/new')}>新建项目</Button>}
             </SpaceBetween>
           }
         >
@@ -391,8 +525,8 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
     >
       <SpaceBetween size="l">
         <Container header={<Header variant="h2"><ReviewTag id="A" />今日概览</Header>}>
-          <Grid gridDefinition={[{ colspan: { default: 12, m: 5 } }, { colspan: { default: 12, m: 7 } }]}>
-            <FormField label="从一个地址开始" description="输入地址，系统自动补全房产数据并预填交易分析。">
+          <Grid gridDefinition={role.can('create_project') ? [{ colspan: { default: 12, m: 5 } }, { colspan: { default: 12, m: 7 } }] : [{ colspan: 12 }]}>
+            {role.can('create_project') && <FormField label="从一个地址开始" description="输入地址，系统自动补全房产数据并预填交易分析。">
               <Autosuggest
                 value={q}
                 placeholder="例如 4928 NW Fisk Ave"
@@ -411,12 +545,21 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
                 }}
                 onSelect={({ detail }) => { const v = detail.selectedOption?.value ?? detail.value; go(`/projects/new?address=${encodeURIComponent(v)}`); }}
               />
-            </FormField>
+            </FormField>}
             <ColumnLayout columns={4} minColumnWidth={120} variant="text-grid">
               <Stat label="线索" value={String(summary?.leads ?? '—')} sub={`${projects.filter((p) => p.lead_heat === 'hot_lead').length} 条热线索`} />
-              <Stat label="在建" value={String(summary?.active ?? '—')} sub={`${summary?.over_budget_count ?? 0} 个超预算`} />
-              <Stat label="已投入" value={compactMoney(summary?.total_invested)} sub="在建项目买入价 + 已支出" />
-              <Stat label="预计利润" value={compactMoney(summary?.expected_profit)} sub="在建：目标售价 − 买入 − 装修" />
+              <Stat label="在建" value={String(summary?.active ?? '—')} sub={summary?.money_hidden ? '正在施工或挂牌' : `${summary?.over_budget_count ?? 0} 个超预算`} />
+              {summary?.money_hidden ? (
+                <>
+                  <Stat label="轮到我" value={String(roleData?.my_todo?.length ?? '—')} sub={`${roleData?.my_todo?.filter((r) => r.is_current).length ?? 0} 件是现在这段的`} />
+                  <Stat label="已完成" value={String(summary?.portfolio ?? '—')} sub="已售出的房子" />
+                </>
+              ) : (
+                <>
+                  <Stat label="已投入" value={compactMoney(summary?.total_invested)} sub="在建项目买入价 + 已支出" />
+                  <Stat label="预计利润" value={compactMoney(summary?.expected_profit)} sub="在建：目标售价 − 买入 − 装修" />
+                </>
+              )}
             </ColumnLayout>
           </Grid>
         </Container>
@@ -424,7 +567,7 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
         <Board
           items={items}
           i18nStrings={boardI18n}
-          onItemsChange={({ detail }) => { setItems(detail.items); saveLayout(detail.items); }}
+          onItemsChange={({ detail }) => { setItems(detail.items); saveLayout(role.actor, detail.items); }}
           empty={<Box textAlign="center" color="inherit"><b>看板是空的</b><Box variant="p" color="inherit">用右上角“添加小组件”加回来。</Box></Box>}
           renderItem={(item, actions) => (
             <BoardItem
