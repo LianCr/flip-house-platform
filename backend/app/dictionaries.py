@@ -51,7 +51,7 @@ FILE_TYPES = [
     {"value": "title_report", "label": "产权报告", "stage": "买入"},
     {"value": "inspection", "label": "检验报告", "stage": "买入"},
     {"value": "closing_statement", "label": "结算单", "stage": "买入"},
-    {"value": "permit", "label": "许可证", "stage": "施工"},
+    {"value": "permit", "label": "permit（政府已核发的文件）", "stage": "施工"},
     {"value": "contractor_contract", "label": "承包商合同", "stage": "施工"},
     {"value": "invoice", "label": "发票", "stage": "施工"},
     {"value": "change_order", "label": "变更单", "stage": "施工"},
@@ -60,8 +60,15 @@ FILE_TYPES = [
     {"value": "sale_closing", "label": "成交结算单", "stage": "卖出"},
     {"value": "loan_doc", "label": "贷款文件（loan doc）", "stage": "买入"},
     {"value": "seller_disclosure", "label": "卖方披露（seller disclosure）", "stage": "卖出"},
-    {"value": "inspection_report", "label": "施工检查报告（inspection）", "stage": "施工"},
-    {"value": "insurance", "label": "保险", "stage": "通用"},
+    {"value": "inspection_report", "label": "施工检查结果（inspection）", "stage": "施工"},
+    {"value": "insurance", "label": "房屋保险（有到期日）", "stage": "通用"},
+    {"value": "measure_note", "label": "量尺记录", "stage": "买入"},
+    {"value": "drawing_final", "label": "定稿图纸", "stage": "施工"},
+    {"value": "permit_application", "label": "permit 申请回执", "stage": "施工"},
+    {"value": "offer", "label": "买家 offer", "stage": "卖出"},
+    {"value": "sale_docs", "label": "卖房文件包", "stage": "卖出"},
+    {"value": "sale_signed", "label": "签署版卖房文件", "stage": "卖出"},
+    {"value": "photo", "label": "现场照片", "stage": "通用"},
     {"value": "report", "label": "报表", "stage": "通用"},
     {"value": "other", "label": "其他", "stage": "通用"},
 ]
@@ -110,21 +117,57 @@ ANALYSIS_DEFAULTS = {
     "target_margin_pct": 20,   # 最高出价按目标利润率（利润 ÷ 总成本）反推
 }
 
-# ---------------- 人员与分工 ----------------
-# 负责人代号来自业务负责人手写的流程；不写真名。“负责人”是看总览的人，只看不填。
-PEOPLE = [
-    {"code": "负责人", "label": "负责人", "role": "看总览、盯进度"},
-    {"code": "A", "label": "A", "role": "买建筑材料、园丁"},
-    {"code": "D", "label": "D", "role": "决策价格、签文件"},
-    {"code": "J", "label": "J", "role": "筛选房源、贷款保险、agent、staging、上市"},
-    {"code": "K", "label": "K", "role": "保险、水电网、seller disclosure"},
-    {"code": "L", "label": "L", "role": "看房、量尺、参与决策"},
-    {"code": "S", "label": "S", "role": "卖房文件"},
-    {"code": "W", "label": "W", "role": "卖房文件"},
-    {"code": "Z", "label": "Z", "role": "permit、inspection、final 检查"},
-    {"code": "设计师", "label": "设计师", "role": "设计方案"},
-    {"code": "园丁", "label": "园丁", "role": "剪草"},
+# ---------------- 人员、级别与权限 ----------------
+# 四级：紫 决策 / 蓝 统筹 / 青 执行 / 灰 外部。颜色跟级别走。
+TIERS = {
+    "purple": {"label": "决策", "color": "#7A3EE8", "order": 0},
+    "blue":   {"label": "统筹", "color": "#0972D3", "order": 1},
+    "teal":   {"label": "执行", "color": "#0E8A8A", "order": 2},
+    "grey":   {"label": "外部", "color": "#7D8998", "order": 3},
+}
+
+# 代号来自负责人手写流程；不写真名。老板、PM、承包商是 9/14 录音里补的。
+ROLES = [
+    {"code": "老板", "label": "老板", "tier": "purple", "duties": "看全局，一般不动手"},
+    {"code": "D", "label": "D", "tier": "purple", "duties": "董事会定价、签 loan doc 和卖房文件；和 J 一起确认每个大节点；和 L 一起管施工"},
+    {"code": "J", "label": "J", "tier": "purple", "duties": "Jessie：筛房源、贷款、采购、agent、staging、上市；和 D 一起确认每个大节点"},
+    {"code": "负责人", "label": "负责人", "tier": "blue", "duties": "统筹：看全局、盯进度、代人打勾、代 D/J 确认、补风险备注"},
+    {"code": "L", "label": "L", "tier": "blue", "duties": "看房、量尺估价、参与定价；和 D 一起管施工"},
+    {"code": "PM", "label": "PM", "tier": "blue", "duties": "项目经理：盯施工进度、传现场照片、检查没过时带施工方整改"},
+    {"code": "K", "label": "K", "tier": "teal", "duties": "保险、水电瓦斯开关、seller disclosure"},
+    {"code": "Z", "label": "Z", "tier": "teal", "duties": "permit 申请与领取、约检查、final"},
+    {"code": "S", "label": "S", "tier": "teal", "duties": "卖房文件"},
+    {"code": "W", "label": "W", "tier": "teal", "duties": "卖房文件"},
+    {"code": "A", "label": "A", "tier": "teal", "duties": "安排园丁剪草"},
+    {"code": "设计师", "label": "设计师", "tier": "teal", "duties": "设计方案、设计定稿"},
+    {"code": "园丁", "label": "园丁", "tier": "grey", "duties": "剪草，传剪草后照片"},
+    {"code": "承包商", "label": "承包商", "tier": "grey", "duties": "施工方，传现场照片（是否进系统待确认）"},
 ]
+ROLE_BY_CODE = {r["code"]: r for r in ROLES}
+PEOPLE = [{"code": r["code"], "label": r["label"], "role": r["duties"]} for r in ROLES]  # 兼容旧前端字段
+
+
+def tier_of(code: str) -> str:
+    return ROLE_BY_CODE.get(code, {}).get("tier", "grey")
+
+
+# 动作 → 允许的级别或具体代号。没列的动作默认只有紫、蓝。
+PERMISSIONS = {
+    "read_money":        ["purple", "blue"],          # 看买卖价、预算、利润、分析
+    "dashboard":         ["purple", "blue"],          # 完整工作台；青灰只有“我的待办”
+    "create_project":    ["purple", "blue"],
+    "delete_project":    ["purple", "负责人"],
+    "edit_project":      ["purple", "blue"],          # 日期、阶段、风险、备注
+    "edit_money":        ["purple", "blue"],          # 买入价、目标售价、成交价
+    "budget":            ["purple", "blue"],
+    "procurement":       ["purple", "blue", "J"],  # 材料清单：J 主责
+    "analysis":          ["purple", "blue"],
+    "utilities":         ["purple", "blue", "K"],
+    "inspections":       ["purple", "blue", "Z"],
+    "upload_any":        ["purple", "blue"],          # 传任何类型的文件
+    "tick_any":          ["purple", "blue"],          # 代任何人打勾
+    "confirm_for_others": ["负责人"],                  # 代 D/J 确认大节点
+}
 
 # 每个功能块由谁负责（块 → 代号列表）。"?" 表示流程里没写，待确认。
 OWNER_MAP = {
@@ -133,18 +176,21 @@ OWNER_MAP = {
     "overview.status": ["负责人"],
     "overview.risks": ["负责人"],
     "overview.notes": ["负责人"],
-    "overview.budget": ["A"],
+    "overview.budget": ["J"],
+    "overview.inspections": ["Z"],
     "overview.updates": ["负责人"],
     "analysis": ["D", "L"],
     "data.specs": ["J", "L"],
     "data.owner": ["J"],
     "data.mortgage": ["J"],
     "data.history": ["J"],
+    "data.utilities": ["K"],
     "files.upload": ["当前身份"],
     "files.table": ["负责人"],
     "budget.summary": ["负责人"],
     "budget.lines": ["?"],
-    "budget.expenses": ["A"],
+    "budget.expenses": ["J"],
+    "budget.procurement": ["J"],
     "wizard": ["J"],
 }
 
@@ -153,52 +199,126 @@ FILE_DEFAULT_OWNER = {
     "purchase_contract": "J", "title_report": "J", "inspection": "J", "closing_statement": "K",
     "loan_doc": "D", "insurance": "K",
     "permit": "Z", "inspection_report": "Z", "drawing": "设计师",
-    "contractor_contract": "Z", "invoice": "A", "change_order": "Z",
+    "contractor_contract": "Z", "invoice": "J", "change_order": "Z",
     "listing_agreement": "J", "sale_closing": "S", "seller_disclosure": "K",
     "report": "负责人", "other": "负责人",
+    "measure_note": "L", "drawing_final": "设计师", "permit_application": "Z", "offer": "J", "sale_docs": "S", "sale_signed": "D", "photo": "PM",
 }
 
 # ---------------- 阶段清单 ----------------
-# 6 个阶段来自负责人手写的 24 条。证据规则：file:<doc_type> | field:<项目字段> | expense:any | project:exists | manual
+# 5 个阶段来自负责人 2026-09-14 重新拆的框架（买 / 贷 / 设计+permit / 施工+采购 / 卖上市）。
+# 证据规则：file:<doc_type> | field:<项目字段> | expense:any | project:exists | utilities:on | utilities:off
+#           | inspections:any | inspections:final | manual。多条用 | 表示任一满足。
+# confirm: 大节点由 D 和 J 各勾一次，两个都勾了才算过（负责人 2026-09-14 定的）。
+GATE_CONFIRM = ["D", "J"]
+
+# 哪些活要 permit（按常识定的默认值，每套房可改）
+PERMIT_RULE = {
+    "need": ["动结构", "加建", "屋顶", "水管", "电线", "瓦斯管", "暖通", "改窗洞"],
+    "no_need": ["清理", "搬运", "非结构性拆除", "刷漆", "换地板", "换台面", "换柜子", "换灯具"],
+}
+
+# 交付物 kind：file 文件 / photo 照片 / field 填一个数 / record 结构化记录 / confirm 大节点确认 / tick 手动勾
+def _f(label, doc_type): return {"kind": "file", "label": label, "doc_type": doc_type}
+def _p(label): return {"kind": "photo", "label": label, "doc_type": "photo"}
+def _d(label, field): return {"kind": "field", "label": label, "field": field}
+def _r(label, record): return {"kind": "record", "label": label, "record": record}
+def _c(label, field=None, doc_type=None): return {"kind": "confirm", "label": label, "field": field, "doc_type": doc_type}
+def _t(label="做完打勾"): return {"kind": "tick", "label": label}
+
 STAGE_CHECKLIST = [
-    {"key": "s1", "label": "① 找房、看房、出价", "items": [
-        {"key": "screen", "title": "筛选房源：死亡记录、unpermitted sqft", "owners": ["J"], "evidence": "project:exists"},
-        {"key": "view", "title": "去看房：定时间和 open door 形式", "owners": ["L"], "evidence": "manual"},
-        {"key": "price", "title": "董事会决策价格、谈价", "owners": ["D", "L"], "evidence": "field:purchase_price"},
-        {"key": "open_escrow", "title": "大节点：Open escrow", "owners": ["负责人"], "evidence": "manual", "gate": True},
+    {"key": "s1", "label": "① 买", "short": "买", "items": [
+        {"key": "screen", "title": "筛选房源", "owners": ["J"], "evidence": "field:risks", "deliverable": _d("建项目、写风险", "risks")},
+        {"key": "view", "title": "看房", "owners": ["L"], "evidence": "photo:view", "deliverable": _p("看房照片")},
+        {"key": "price", "title": "董事会定价、谈价", "owners": ["D", "L"], "evidence": "field:purchase_price", "deliverable": _d("买入价", "purchase_price")},
+        {"key": "open_escrow", "title": "Open escrow", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("购房合同", doc_type="purchase_contract")},
     ]},
-    {"key": "s2", "label": "② 买入 escrow 期间", "items": [
-        {"key": "loan_insurance", "title": "开始贷款、开始买房屋保险", "owners": ["J", "K"], "evidence": "file:insurance|file:loan_doc"},
-        {"key": "loan_doc", "title": "签 loan doc", "owners": ["D", "L"], "evidence": "file:loan_doc"},
-        {"key": "measure", "title": "量尺", "owners": ["L"], "evidence": "manual"},
-        {"key": "design", "title": "设计方案", "owners": ["设计师"], "evidence": "file:drawing"},
-        {"key": "utilities_on", "title": "开通水电网", "owners": ["K"], "evidence": "manual"},
-        {"key": "close_escrow", "title": "大节点：Close escrow", "owners": ["负责人"], "evidence": "field:purchase_date", "gate": True},
+    {"key": "s2", "label": "② 贷", "short": "贷", "items": [
+        {"key": "loan_insurance", "title": "开始贷款、买保险", "owners": ["J", "K"], "evidence": "file:insurance", "deliverable": _f("保险单（填到期日）", "insurance")},
+        {"key": "loan_doc", "title": "签 loan doc", "owners": ["D", "L"], "evidence": "file:loan_doc", "deliverable": _f("签署的贷款文件", "loan_doc")},
+        {"key": "measure", "title": "量尺、估价", "owners": ["L"], "evidence": "file:measure_note", "deliverable": _f("量尺记录", "measure_note")},
+        {"key": "design", "title": "设计方案", "owners": ["设计师"], "evidence": "file:drawing", "deliverable": _f("方案图纸", "drawing")},
+        {"key": "close_escrow", "title": "Close escrow", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("买入日期", field="purchase_date", doc_type="closing_statement")},
+        {"key": "utilities_on", "title": "开水电瓦斯", "owners": ["K"], "evidence": "utilities:on", "deliverable": _r("三家账户都开通", "utilities")},
     ]},
-    {"key": "s3", "label": "③ 办 permit", "items": [
-        {"key": "permit", "title": "申请 permit（每个房子不一样）", "owners": ["Z"], "evidence": "file:permit"},
-        {"key": "start", "title": "大节点：开始施工", "owners": ["负责人"], "evidence": "field:construction_start", "gate": True},
+    {"key": "s3", "label": "③ 设计定稿 + permit", "short": "设计+permit", "items": [
+        {"key": "design_final", "title": "设计定稿", "owners": ["设计师"], "evidence": "file:drawing_final", "deliverable": _f("定稿图纸", "drawing_final")},
+        {"key": "permit_apply", "title": "申请 permit", "owners": ["Z"], "evidence": "file:permit_application", "deliverable": _f("申请回执", "permit_application")},
+        {"key": "prep_work", "title": "先干不用 permit 的活", "owners": ["PM"], "evidence": "photo:prep_work", "deliverable": _p("现场照片")},
+        {"key": "permit_issued", "title": "拿到 permit 文件", "owners": ["Z"], "evidence": "file:permit", "deliverable": _f("permit 文件", "permit")},
+        {"key": "start", "title": "可以开工", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("开工日期", field="construction_start")},
     ]},
-    {"key": "s4", "label": "④ 施工与检查", "items": [
-        {"key": "materials", "title": "买建筑材料", "owners": ["A"], "evidence": "expense:any"},
-        {"key": "inspection", "title": "申请 inspection（有时间限制）", "owners": ["Z"], "evidence": "file:inspection_report"},
-        {"key": "agent", "title": "agent 介入", "owners": ["J"], "evidence": "manual"},
-        {"key": "final", "title": "大节点：final 检查通过", "owners": ["Z"], "evidence": "manual", "gate": True},
+    {"key": "s4", "label": "④ 施工 + 采购", "short": "施工+采购", "items": [
+        {"key": "purchase", "title": "分阶段采购", "owners": ["J"], "evidence": "procurement:critical", "deliverable": _r("采购清单", "procurement")},
+        {"key": "progress", "title": "施工进度", "owners": ["PM"], "evidence": "photo:progress", "deliverable": _p("进度照片")},
+        {"key": "inspections", "title": "阶段性检查", "owners": ["Z"], "evidence": "inspections:any", "deliverable": _r("检查记录", "inspections")},
+        {"key": "agent", "title": "agent 介入", "owners": ["J"], "evidence": "manual", "deliverable": _t()},
+        {"key": "final", "title": "final", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("final 检查通过", field=None)},
     ]},
-    {"key": "s5", "label": "⑤ 布置、上市", "items": [
-        {"key": "staging", "title": "staging", "owners": ["J"], "evidence": "manual"},
-        {"key": "listing", "title": "上市", "owners": ["J"], "evidence": "field:list_date"},
-        {"key": "mow", "title": "园丁剪草", "owners": ["A", "园丁"], "evidence": "manual"},
-        {"key": "offer", "title": "大节点：收到 offer，open escrow", "owners": ["负责人"], "evidence": "manual", "gate": True},
-    ]},
-    {"key": "s6", "label": "⑥ 卖出 escrow 与收尾", "items": [
-        {"key": "sale_docs", "title": "卖房文件", "owners": ["S", "W"], "evidence": "file:sale_closing"},
-        {"key": "disclosure", "title": "seller disclosure", "owners": ["K"], "evidence": "file:seller_disclosure"},
-        {"key": "sign", "title": "签卖房文件", "owners": ["D"], "evidence": "manual"},
-        {"key": "closed", "title": "大节点：交割完成", "owners": ["负责人"], "evidence": "field:sale_date", "gate": True},
-        {"key": "services_off", "title": "关水电网、取消房屋保险", "owners": ["K"], "evidence": "manual"},
+    {"key": "s5", "label": "⑤ 卖", "short": "卖", "items": [
+        {"key": "staging", "title": "staging", "owners": ["J"], "evidence": "photo:staging", "deliverable": _p("staging 照片")},
+        {"key": "listing", "title": "上市", "owners": ["J"], "evidence": "field:list_date|file:listing_agreement", "deliverable": _d("挂牌日期", "list_date")},
+        {"key": "mow", "title": "园丁剪草", "owners": ["A", "园丁"], "evidence": "photo:mow", "deliverable": _p("剪草后照片")},
+        {"key": "offer", "title": "收到 offer", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("offer 文件", doc_type="offer")},
+        {"key": "sale_docs", "title": "卖房文件", "owners": ["S", "W"], "evidence": "file:sale_docs", "deliverable": _f("卖房文件包", "sale_docs")},
+        {"key": "disclosure", "title": "seller disclosure", "owners": ["K"], "evidence": "file:seller_disclosure", "deliverable": _f("披露文件", "seller_disclosure")},
+        {"key": "sign", "title": "签卖房文件", "owners": ["D"], "evidence": "file:sale_signed", "deliverable": _f("签署版", "sale_signed")},
+        {"key": "closed", "title": "交割完成", "owners": GATE_CONFIRM, "evidence": "confirm", "gate": True, "confirm": GATE_CONFIRM, "deliverable": _c("成交日期", field="sale_date", doc_type="sale_closing")},
+        {"key": "services_off", "title": "关水电瓦斯、退保险", "owners": ["K"], "evidence": "utilities:off", "deliverable": _r("三家账户都关闭", "utilities")},
     ]},
 ]
+STEP_BY_KEY = {it["key"]: it for st in STAGE_CHECKLIST for it in st["items"]}
+ITEM_EVIDENCE = {it["key"]: it["evidence"] for st in STAGE_CHECKLIST for it in st["items"]}
+
+# 采购清单模板（来自「项目采购进度」表；wave=before_rough 必须齐才能过「分阶段采购」证据）
+PROCUREMENT_WAVES = [
+    {"value": "before_rough", "label": "水电检查前需要"},
+    {"value": "long_lead", "label": "定制/选样/配送需时间"},
+    {"value": "after_waterproof", "label": "防水后、final 前需要"},
+    {"value": "yard", "label": "院子"},
+    {"value": "other", "label": "其他"},
+]
+PROCUREMENT_STATUSES = [
+    {"value": "pending_spec", "label": "待选型"},
+    {"value": "pending_order", "label": "待下单"},
+    {"value": "ordered", "label": "已下单"},
+    {"value": "received", "label": "已到货"},
+    {"value": "exception", "label": "异常"},
+    {"value": "na", "label": "不适用"},
+]
+PROCUREMENT_TEMPLATE: list[dict] = [
+    *[{"wave": "before_rough", "name": n} for n in ("淋浴花洒组件", "独立浴缸及独立浴缸水龙头", "镜前灯（点位）", "入户吊灯（点位）", "餐桌灯（点位）", "岛台灯（点位）")],
+    *[{"wave": "long_lead", "name": n} for n in ("洗手台橱柜", "厨房橱柜、厨房Backsplash样式", "入户门、后门", "车库门", "推拉门、窗户", "炉子、排油烟机、洗碗机（36寸款）", "一体式壁炉的壁炉门")],
+    *[{"wave": "after_waterproof", "name": n} for n in (
+        "地板", "淋浴间瓷砖及淋浴间地面瓷砖", "壁炉门", "室内门", "室内门把手", "入户门锁",
+        "炉子、排油烟机、洗碗机", "洗手台镜子", "镜前灯", "洗手台水龙头", "厨房水龙头", "岛台灯",
+        "壁炉样式", "入户吊灯", "餐桌灯", "卧室灯", "室外壁灯", "庭院灯",
+    )],
+    *[{"wave": "yard", "name": n} for n in ("草坪", "植物", "砂石及木屑", "围墙", "围栏")],
+    {"wave": "other", "name": "其他"},
+]
+
+# 水电瓦斯三家：每套房各一条
+UTILITY_KINDS = [
+    {"value": "water", "label": "水"},
+    {"value": "electric", "label": "电"},
+    {"value": "gas", "label": "瓦斯"},
+]
+UTILITY_STATUSES = [
+    {"value": "not_started", "label": "还没办"},
+    {"value": "pending", "label": "办了在等"},
+    {"value": "on", "label": "已开通"},
+    {"value": "off", "label": "已关闭"},
+]
+INSPECTION_RESULTS = [
+    {"value": "scheduled", "label": "已约"},
+    {"value": "passed", "label": "通过"},
+    {"value": "failed", "label": "没过，整改中"},
+]
+
+# 青灰身份看不到的：项目上的金额字段；带金额的文件类型（下载也不给）
+MONEY_FIELDS = {"purchase_price", "target_arv", "sale_price"}
+MONEY_DOCS = {"purchase_contract", "closing_statement", "loan_doc", "invoice", "offer", "sale_docs", "sale_signed", "sale_closing"}
 
 KEY_FIELDS_FOR_COMPLETENESS = [
     "year_built", "sqft", "beds", "baths_full", "lot_sqft", "apn",
@@ -216,8 +336,17 @@ def meta() -> dict:
         "sources": SOURCES,
         "property_fields": PROPERTY_FIELDS,
         "people": PEOPLE,
+        "roles": ROLES,
+        "tiers": TIERS,
+        "permissions": PERMISSIONS,
         "owner_map": OWNER_MAP,
         "file_default_owner": FILE_DEFAULT_OWNER,
         "stage_checklist": STAGE_CHECKLIST,
+        "permit_rule": PERMIT_RULE,
+        "utility_kinds": UTILITY_KINDS,
+        "utility_statuses": UTILITY_STATUSES,
+        "inspection_results": INSPECTION_RESULTS,
+        "procurement_waves": PROCUREMENT_WAVES,
+        "procurement_statuses": PROCUREMENT_STATUSES,
         "analysis_defaults": {k: v for k, v in ANALYSIS_DEFAULTS.items() if k != "utilities_by_sqft"},
     }

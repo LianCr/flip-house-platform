@@ -137,7 +137,10 @@ class Project(Base):
     budget_lines: Mapped[list["BudgetLine"]] = relationship(cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship(cascade="all, delete-orphan")
     files: Mapped[list["ProjectFile"]] = relationship(cascade="all, delete-orphan")
+    utilities: Mapped[list["UtilityAccount"]] = relationship(cascade="all, delete-orphan")
+    inspections: Mapped[list["Inspection"]] = relationship(cascade="all, delete-orphan")
     analyses: Mapped[list["DealAnalysis"]] = relationship(cascade="all, delete-orphan")
+    procurement_items: Mapped[list["ProcurementItem"]] = relationship(cascade="all, delete-orphan")
 
 
 class BudgetLine(Base):
@@ -180,6 +183,8 @@ class ProjectFile(Base):
     amount: Mapped[Optional[float]] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String, default="upload")
     uploaded_by: Mapped[Optional[str]] = mapped_column(String)  # 谁传的（人员代号）
+    step_key: Mapped[Optional[str]] = mapped_column(String, index=True)  # 挂到清单的哪一步（照片靠这个打勾）
+    expires_at: Mapped[Optional[str]] = mapped_column(String)  # 到期日（保险这类有时限的文件），工作台“未来 30 天”会提醒
     extracted_text: Mapped[Optional[str]] = mapped_column(Text)
     uploaded_at: Mapped[str] = mapped_column(String, default=now_iso)
 
@@ -221,3 +226,52 @@ class ProjectStep(Base):
     done_by: Mapped[Optional[str]] = mapped_column(String)
     done_at: Mapped[Optional[str]] = mapped_column(String)
     note: Mapped[Optional[str]] = mapped_column(String)
+
+
+class UtilityAccount(Base):
+    """水、电、瓦斯三家账户：每套房各一条。各人自己填，负责人打开就能看，不用汇报。"""
+    __tablename__ = "utility_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    kind: Mapped[str] = mapped_column(String)  # water / electric / gas
+    company: Mapped[Optional[str]] = mapped_column(String)
+    account_no: Mapped[Optional[str]] = mapped_column(String)
+    login: Mapped[Optional[str]] = mapped_column(String)
+    password: Mapped[Optional[str]] = mapped_column(String)
+    opened_under: Mapped[Optional[str]] = mapped_column(String)  # 用谁的名字开的
+    status: Mapped[str] = mapped_column(String, default="not_started")  # not_started / pending / on / off
+    blocker: Mapped[Optional[str]] = mapped_column(String)  # 卡在什么地方
+    updated_by: Mapped[Optional[str]] = mapped_column(String)
+    updated_at: Mapped[str] = mapped_column(String, default=now_iso, onupdate=now_iso)
+
+
+class Inspection(Base):
+    """施工检查记录：一次检查一行，次数每套房不同。最后一次标 is_final，通过了就是 final。"""
+    __tablename__ = "inspections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String)  # 查什么：框架 / 水电 / 屋顶 / final
+    date: Mapped[Optional[str]] = mapped_column(String)
+    result: Mapped[str] = mapped_column(String, default="scheduled")  # scheduled / passed / failed
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False)
+    fixer: Mapped[Optional[str]] = mapped_column(String)  # 没过谁整改
+    note: Mapped[Optional[str]] = mapped_column(String)
+    recorded_by: Mapped[Optional[str]] = mapped_column(String)
+    created_at: Mapped[str] = mapped_column(String, default=now_iso)
+
+
+class ProcurementItem(Base):
+    """材料采购行：按节点波次管理选型 / 下单 / 到货 / 异常。"""
+    __tablename__ = "procurement_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    wave: Mapped[str] = mapped_column(String, index=True)  # before_rough / long_lead / after_waterproof / yard / other
+    name: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending_spec")  # pending_spec / pending_order / ordered / received / exception / na
+    note: Mapped[Optional[str]] = mapped_column(String)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    updated_by: Mapped[Optional[str]] = mapped_column(String)
+    updated_at: Mapped[str] = mapped_column(String, default=now_iso, onupdate=now_iso)

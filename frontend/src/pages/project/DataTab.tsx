@@ -14,13 +14,18 @@ import { useFlash } from '../../lib/flash';
 import { dateStr, money, pct, text } from '../../lib/format';
 import ReviewTag from '../../components/ReviewTag';
 import OwnerTag from '../../components/OwnerTag';
+import UtilitiesPanel from '../../components/UtilitiesPanel';
 
-export default function DataTab({ projectId, reload }: { projectId: number; reload: () => Promise<any> }) {
+export default function DataTab({ projectId, reload, section }: { projectId: number; reload: () => Promise<any>; section?: string | null }) {
   const flash = useFlash();
   const [data, setData] = useState<PropertyData | null>(null);
+  const [activeTab, setActiveTab] = useState(section === 'utilities' ? 'utilities' : 'specs');
 
   const load = useCallback(() => api.propertyData(projectId).then(setData), [projectId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (section === 'utilities') setActiveTab('utilities');
+  }, [section]);
 
   if (!data) return <Box padding="l" textAlign="center"><Spinner /></Box>;
 
@@ -28,6 +33,8 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
 
   return (
     <Tabs
+      activeTabId={activeTab}
+      onChange={({ detail }) => setActiveTab(detail.activeTabId)}
       tabs={[
         {
           id: 'specs',
@@ -44,6 +51,15 @@ export default function DataTab({ projectId, reload }: { projectId: number; relo
                   />
                 ))}
               </ColumnLayout>
+            </Container>
+          ),
+        },
+        {
+          id: 'utilities',
+          label: '水电瓦斯',
+          content: (
+            <Container header={<Header variant="h2" description="三家公司每套房都不一样。谁办的谁填：公司、账号密码、用谁的名字开的、开通了没有、卡在哪。负责人打开就能看，不用另外汇报。"><ReviewTag id="E" /><OwnerTag block="data.utilities" />水、电、瓦斯账户</Header>}>
+              <UtilitiesPanel projectId={projectId} onChanged={reload} />
             </Container>
           ),
         },

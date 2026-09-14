@@ -16,6 +16,8 @@ BUILTIN: list[AddressCandidate] = [
     AddressCandidate("4312 N Walnut St, Kansas City, MO 64116", "4312 N Walnut St", "Kansas City", "MO", "64116", 39.1690, -94.5780),
     AddressCandidate("1842 Alvarado Terrace, Los Angeles, CA 90006", "1842 Alvarado Terrace", "Los Angeles", "CA", "90006", 34.0470, -118.2790),
     AddressCandidate("725 S Mariposa Ave, Los Angeles, CA 90005", "725 S Mariposa Ave", "Los Angeles", "CA", "90005", 34.0590, -118.3010),
+    AddressCandidate("5601 N Holmes St, Kansas City, MO 64118", "5601 N Holmes St", "Kansas City", "MO", "64118", 39.1930, -94.5690),
+    AddressCandidate("3419 Pasadena Ave, Los Angeles, CA 90031", "3419 Pasadena Ave", "Los Angeles", "CA", "90031", 34.0790, -118.2120),
 ]
 
 PROPERTY_TYPES = ["Single Family", "Single Family", "Single Family", "Duplex", "Townhouse"]

@@ -4,9 +4,13 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from .common import get_actor, log_update
+from .common import get_actor, log_update, require
 
-router = APIRouter(prefix="/api", tags=["budget"])
+
+def _guard(actor: str = Depends(get_actor)) -> None:
+    require(actor, "budget", what="看或改预算")
+
+router = APIRouter(prefix="/api", tags=["budget"], dependencies=[Depends(_guard)])
 
 
 def _check(db: Session, project_id: int):

@@ -50,10 +50,10 @@ const WIDGETS: Record<WidgetId, ItemData & { cols: number; rows: number }> = {
   vendors: { title: '供应商支出前五', tag: 'K', cols: 2, rows: 4 },
   funnel: { title: '线索漏斗', tag: 'L', cols: 1, rows: 4 },
   updates: { title: '谁更新了什么', tag: 'M', cols: 2, rows: 4 },
-  turns: { title: '每套房轮到谁', tag: 'N', cols: 2, rows: 4 },
+  turns: { title: '每套房轮到谁', tag: 'N', cols: 4, rows: 7 },
 };
-const DEFAULT_ORDER: WidgetId[] = ['attention', 'turns', 'updates', 'upcoming', 'money', 'capital', 'stages', 'funnel', 'weekly', 'retro', 'vendors', 'recent', 'list'];
-const LAYOUT_KEY = 'boardLayout.v3';
+const DEFAULT_ORDER: WidgetId[] = ['attention', 'turns'];
+const LAYOUT_KEY = 'boardLayout.v5';
 
 function mkItem(id: WidgetId, extra?: Partial<Item>): Item {
   const w = WIDGETS[id];
@@ -162,7 +162,7 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
         ) },
         { id: 'stage', header: '阶段', sortingField: 'stage', cell: (p) => `${labelOf(meta?.stages, p.stage)} · ${labelOf(meta?.substages[p.stage], p.substage)}` },
         { id: 'status', header: '状态', sortingField: 'status', cell: (p) => <StatusBadge status={p.status} /> },
-        { id: 'budget', header: '预算已用', sortingField: 'budget_used_pct', cell: (p) => (p.budget_planned > 0 ? `${pct(p.budget_used_pct)}（${money(p.budget_spent)} / ${money(p.budget_planned)}）` : '—') },
+        { id: 'budget', header: '预算已用', sortingField: 'budget_used_pct', cell: (p) => ((p.budget_planned ?? 0) > 0 ? `${pct(p.budget_used_pct)}（${money(p.budget_spent)} / ${money(p.budget_planned)}）` : '—') },
         { id: 'arv', header: '目标售价', sortingField: 'target_arv', cell: (p) => money(p.target_arv) },
         { id: 'updated', header: '更新', sortingField: 'updated_at', cell: (p) => dateStr(p.updated_at) },
       ]}
@@ -184,21 +184,32 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
 
   const widget = (id: WidgetId) => {
     switch (id) {
-      case 'attention':
+      case 'attention': {
+        const bar: Record<string, string> = { error: '#d91515', warning: '#8d6605', info: '#0972d3' };
+        const bg: Record<string, string> = { error: '#fff5f5', warning: '#fffbf0', info: '#f3f8ff' };
         return insights.length ? (
-          <SpaceBetween size="s">
+          <SpaceBetween size="xs">
             {insights.slice(0, 8).map((i, k) => (
-              <div key={k}>
-                <StatusIndicator type={i.level}>{i.tag}</StatusIndicator>
-                <Box variant="p">{i.text} <Link href={i.href} onFollow={(e) => { e.preventDefault(); go(i.href); }}>去看看</Link></Box>
+              <div key={k} role="button" tabIndex={0} onClick={() => go(i.href)} onKeyDown={(e) => { if (e.key === 'Enter') go(i.href); }}
+                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', padding: '8px 10px 8px 12px', borderLeft: `4px solid ${bar[i.level]}`, background: bg[i.level], borderRadius: 6, cursor: 'pointer' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: bar[i.level], border: `1px solid ${bar[i.level]}`, borderRadius: 10, padding: '0 7px', whiteSpace: 'nowrap' }}>{i.tag}</span>
+                    <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.projectName}</span>
+                  </div>
+                  <div style={{ fontSize: 14 }}>{i.headline}</div>
+                  {i.detail && <Box variant="small" color="text-body-secondary">{i.detail}</Box>}
+                </div>
+                <Link href={i.href} onFollow={(e) => { e.preventDefault(); go(i.href); }}>去看看</Link>
               </div>
             ))}
           </SpaceBetween>
         ) : empty('所有项目都在正轨上，没有需要处理的事。');
+      }
       case 'money':
         return (
           <BulletList
-            rows={active.map((p) => ({ key: String(p.id), label: projLink(p.id, p.name), actual: p.budget_spent, target: p.budget_planned }))}
+            rows={active.map((p) => ({ key: String(p.id), label: projLink(p.id, p.name), actual: p.budget_spent ?? 0, target: p.budget_planned ?? 0 }))}
             format={compactMoney}
             overAt={1.0}
             targetLabel="预算"
@@ -224,7 +235,7 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
                   <SpaceBetween size="xxs">
                     <Box variant="small" color="text-body-secondary">{p.property.address_std}</Box>
                     <SpaceBetween direction="horizontal" size="xs"><StatusBadge status={p.status} /><Box variant="small">{labelOf(meta?.stages, p.stage)} · {labelOf(meta?.substages[p.stage], p.substage)}</Box></SpaceBetween>
-                    {p.budget_planned > 0 && <Meter value={p.budget_spent} max={p.budget_planned} label="预算已用" reading={`${compactMoney(p.budget_spent)} / ${compactMoney(p.budget_planned)}`} height={6} />}
+                    {(p.budget_planned ?? 0) > 0 && <Meter value={p.budget_spent ?? 0} max={p.budget_planned ?? 0} label="预算已用" reading={`${compactMoney(p.budget_spent)} / ${compactMoney(p.budget_planned)}`} height={6} />}
                   </SpaceBetween>
                 ) },
               ],
@@ -235,16 +246,51 @@ export default function Dashboard({ listOnly = false }: { listOnly?: boolean }) 
       case 'updates':
         return <UpdatesList items={updates} showProject onGo={go} emptyText={loading ? '正在读取…' : '还没有人更新过。'} />;
       case 'turns': {
-        const turns = projects.filter((p) => p.stage !== 'portfolio' && p.next_up.length);
+        const turns = projects.filter((p) => p.stage !== 'portfolio' && (p.stage_progress?.length ?? 0) > 0);
+        const goProject = (p: Project) => {
+          const n = p.next_up[0];
+          go(n ? `/projects/${p.id}?tab=overview&step=${n.key}` : `/projects/${p.id}?tab=overview`);
+        };
         return turns.length ? (
-          <SpaceBetween size="xs">
-            {turns.map((p) => (
-              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: 8, alignItems: 'baseline' }}>
-                <Box>{projLink(p.id, p.name)} <Box variant="small" color="text-body-secondary">{p.current_stage?.label}</Box></Box>
-                <Box>{p.next_up.slice(0, 2).map((n) => <span key={n.key} style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8 }}>{n.owners.map((o) => <OwnerDot key={o} code={o} />)}<span style={{ fontWeight: n.gate ? 700 : 400 }}>{n.title}</span></span>)}</Box>
-              </div>
-            ))}
-          </SpaceBetween>
+          <Cards variant="full-page" cardsPerRow={[{ cards: 1 }, { minWidth: 520, cards: 2 }, { minWidth: 900, cards: 3 }]} items={turns} loading={loading}
+            cardDefinition={{
+              header: (p) => (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                  <Link fontSize="heading-s" href={`/projects/${p.id}`} onFollow={(e) => { e.preventDefault(); goProject(p); }}>{p.name}</Link>
+                  <Box variant="small" color="text-body-secondary">{p.current_stage?.label}</Box>
+                </div>
+              ),
+              sections: [
+                { id: 'img', content: (p) => (
+                  <div style={{ position: 'relative' }}>
+                    <CoverImage propertyId={p.property.id} height={96} radius={8} showLabel={false} />
+                    <div style={{ position: 'absolute', top: 8, right: 8 }}><StatusBadge status={p.status} /></div>
+                  </div>
+                ) },
+                { id: 'track', content: (p) => {
+                  const cur = p.stage_progress.find((s) => s.key === p.current_stage?.key);
+                  return (
+                    <SpaceBetween size="xxs">
+                      <Box variant="small" color="text-body-secondary">{p.property.address_std}</Box>
+                      <Box fontSize="body-s">{cur ? `${cur.label} · 这段做了 ${cur.done}/${cur.total}` : p.current_stage?.label}<Box variant="span" color="text-body-secondary">　大节点过了 {p.stage_progress.filter((s) => s.gate_done).length}/5</Box></Box>
+                    </SpaceBetween>
+                  );
+                } },
+                { id: 'next', header: '轮到', content: (p) => (
+                  p.next_up.length ? (
+                    <SpaceBetween size="xxs">
+                      {p.next_up.slice(0, 2).map((n) => (
+                        <span key={n.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          {n.gate && <span style={{ width: 9, height: 9, transform: 'rotate(45deg)', border: '2px solid #0972d3', borderRadius: 2, marginRight: 6, flexShrink: 0 }} />}
+                          {n.owners.map((o) => <OwnerDot key={o} code={o} />)}<span style={{ fontWeight: n.gate ? 700 : 400 }}>{n.title}</span>
+                        </span>
+                      ))}
+                    </SpaceBetween>
+                  ) : <Box color="text-body-secondary">这段的事都做完了</Box>
+                ) },
+                { id: 'warn', content: (p) => (p.earlier_undone_count > 0 ? <StatusIndicator type="warning">前面 {p.earlier_undone_count} 项没确认</StatusIndicator> : <Box variant="small" color="text-status-success">前面的都确认了</Box>) },
+              ],
+            }} />
         ) : empty(loading ? '正在读取…' : '没有在进行中的房子。');
       }
       case 'upcoming': {

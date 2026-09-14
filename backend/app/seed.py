@@ -15,6 +15,8 @@ from .dictionaries import FILE_DEFAULT_OWNER
 from .providers.mock import BUILTIN, MockProvider
 from .routers.common import set_field_with_source
 
+# 1×1 灰色 PNG，占位照片
+TINY_PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c636060f8cf0000020100010bd0de590000000049454e44ae426082")
 TINY_PDF = (b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
             b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
 
@@ -92,18 +94,20 @@ def _expenses(db: Session, pid: int, rnd: random.Random, spent: dict[str, float]
 
 def _file(db: Session, pid: int, name: str, doc_type: str, stage: str, doc_date: str,
           counterparty: str | None = None, amount: float | None = None, source: str = "lark", mime: str = "application/pdf",
-          uploaded_by: str | None = None):
+          uploaded_by: str | None = None, expires_at: str | None = None, step_key: str | None = None):
     folder = UPLOAD_DIR / str(pid)
     folder.mkdir(parents=True, exist_ok=True)
     who = uploaded_by or FILE_DEFAULT_OWNER.get(doc_type, "负责人")
     rec = models.ProjectFile(project_id=pid, filename=name, stored_path="", mime=mime, doc_type=doc_type, stage=stage,
-                             doc_date=doc_date, counterparty=counterparty, amount=amount, source=source, uploaded_by=who)
+                             doc_date=doc_date, counterparty=counterparty, amount=amount, source=source, uploaded_by=who,
+                             expires_at=expires_at, step_key=step_key)
     db.add(rec)
     db.flush()
     path = folder / f"{rec.id}_{name}"
-    path.write_bytes(TINY_PDF)
+    body = TINY_PNG if mime.startswith("image/") else TINY_PDF
+    path.write_bytes(body)
     rec.stored_path = str(path)
-    rec.size = len(TINY_PDF)
+    rec.size = len(body)
     db.add(models.ProjectUpdate(project_id=pid, actor=who, kind="file", text=f"上传了{FILE_LABEL.get(doc_type, '文件')}：{name}",
                                 created_at=f"{doc_date}T09:{rnd_minute(name):02d}:00"))
 
@@ -115,8 +119,43 @@ def rnd_minute(seed_text: str) -> int:
 def _step(db: Session, pid: int, key: str, who: str, days_ago: int, note: str | None = None) -> None:
     """手动打勾的清单项 + 一条更新记录。"""
     when = f"{d(-days_ago)}T10:{rnd_minute(key + str(pid)):02d}:00"
+    base = key.split(":")[0]
     db.add(models.ProjectStep(project_id=pid, key=key, done=True, done_by=who, done_at=when, note=note))
-    db.add(models.ProjectUpdate(project_id=pid, actor=who, kind="step", text=f"完成了“{STEP_TITLE[key]}”" + (f"：{note}" if note else ""), created_at=when))
+    verb = "确认了" if ":" in key else "完成了"
+    db.add(models.ProjectUpdate(project_id=pid, actor=who, kind="step", text=f"{verb}“{STEP_TITLE[base]}”" + (f"：{note}" if note else ""), created_at=when))
+
+
+def _photo(db: Session, pid: int, step_key: str, label: str, days_ago: int, who: str, n: int = 1) -> None:
+    """挂在某一步上的现场照片（占位图），有它这一步自动打勾。"""
+    for i in range(n):
+        _file(db, pid, f"{label}_{i + 1}.png", "photo", "通用", d(-days_ago), mime="image/png", uploaded_by=who, step_key=step_key, source="upload")
+
+
+def _gate(db: Session, pid: int, key: str, days_ago: int) -> None:
+    """大节点：D 和 J 各确认一次（J 晚半天）。"""
+    _step(db, pid, f"{key}:D", "D", days_ago)
+    _step(db, pid, f"{key}:J", "J", days_ago)
+
+
+def _utilities(db: Session, pid: int, status: str, who_name: str, days_ago: int, blocker_gas: str | None = None) -> None:
+    """水、电、瓦斯三家账户。"""
+    rows = [("water", "KC Water", "W-" + str(pid) + "4471"), ("electric", "Evergy", "E-" + str(pid) + "20955"), ("gas", "Spire", "G-" + str(pid) + "7830")]
+    when = f"{d(-days_ago)}T11:{rnd_minute(str(pid)):02d}:00"
+    for kind, company, acct in rows:
+        st = status
+        blocker = None
+        if kind == "gas" and blocker_gas:
+            st = "pending"; blocker = blocker_gas
+        db.add(models.UtilityAccount(project_id=pid, kind=kind, company=company, account_no=acct, login="flipco@example.com",
+                                     password="••••", opened_under=who_name, status=st, blocker=blocker, updated_by="K", updated_at=when))
+    db.add(models.ProjectUpdate(project_id=pid, actor="K", kind="utility", text=f"填了水电瓦斯账户（用 {who_name} 的名字开的）" + (f"，瓦斯卡在：{blocker_gas}" if blocker_gas else ""), created_at=when))
+
+
+def _inspection(db: Session, pid: int, name: str, days_ago: int, result: str, is_final: bool = False, fixer: str | None = None, note: str | None = None) -> None:
+    when = f"{d(-days_ago)}T14:{rnd_minute(name + str(pid)):02d}:00"
+    db.add(models.Inspection(project_id=pid, name=name, date=d(-days_ago), result=result, is_final=is_final, fixer=fixer, note=note, recorded_by="Z", created_at=when))
+    label = {"scheduled": "已约", "passed": "通过", "failed": "没过，整改中"}[result]
+    db.add(models.ProjectUpdate(project_id=pid, actor="Z", kind="inspection", text=f"记了一次检查：{name} · {label}" + ("（final）" if is_final else ""), created_at=when))
 
 
 def _analysis(db: Session, pr: models.Project, prop: models.Property, val: dict, name: str, *, tier: str,
@@ -165,12 +204,29 @@ def seed(db: Session) -> None:
     _file(db, pr1.id, "屋顶承包合同_Apex.pdf", "contractor_contract", "施工", d(-55), "Apex Roofing", 14000)
     _file(db, pr1.id, "屋顶发票_Apex_1.pdf", "invoice", "施工", d(-30), "Apex Roofing", 13500)
     _file(db, pr1.id, "厨房橱柜报价_HomeDepot.pdf", "invoice", "施工", d(-12), "Home Depot", 9800)
-    _file(db, pr1.id, "施工保险凭证.pdf", "insurance", "通用", d(-58), "State Farm")
+    _file(db, pr1.id, "房屋保险单_StateFarm.pdf", "insurance", "通用", d(-58), "State Farm", expires_at=d(12))
     _file(db, pr1.id, "贷款文件_签署版.pdf", "loan_doc", "买入", d(-72), "Heartland Bank", uploaded_by="D")
     _file(db, pr1.id, "设计方案_v2.pdf", "drawing", "施工", d(-64), uploaded_by="设计师")
     _file(db, pr1.id, "框架检查_通过.pdf", "inspection_report", "施工", d(-20), "Platte County", uploaded_by="Z")
-    for k, who, ago in (("view", "L", 100), ("open_escrow", "负责人", 92), ("measure", "L", 68), ("utilities_on", "K", 60)):
-        _step(db, pr1.id, k, who, ago)
+    _file(db, pr1.id, "施工许可证_KCMO.pdf", "permit", "施工", d(-52), "KC Building Dept", uploaded_by="Z")
+    _file(db, pr1.id, "permit申请回执_KCMO.pdf", "permit_application", "施工", d(-61), "KC Building Dept", uploaded_by="Z")
+    _file(db, pr1.id, "量尺记录_1720sqft.pdf", "measure_note", "买入", d(-68), uploaded_by="L")
+    _file(db, pr1.id, "设计定稿_v2.pdf", "drawing_final", "施工", d(-62), uploaded_by="设计师")
+    _photo(db, pr1.id, "view", "看房", 100, "L", 3)
+    _photo(db, pr1.id, "prep_work", "清理拆除", 60, "PM", 2)
+    _photo(db, pr1.id, "progress", "进度", 10, "PM", 4)
+    _file(db, pr1.id, "厨房总包合同_HomeDepot.pdf", "contractor_contract", "施工", d(-40), "Home Depot", 22000)
+    _file(db, pr1.id, "变更单_屋顶加固.pdf", "change_order", "施工", d(-26), "Apex Roofing", 1500)
+    for row in (("view", "L", 100), ("measure", "L", 68), ("design_final", "设计师", 62, "定稿 v2：开放式厨房，保留壁炉"), ("permit_apply", "Z", 61),
+                ("prep_work", "PM", 60, "清理和拆旧橱柜三天完成"), ("progress", "PM", 10, "屋顶完工，厨房水电走线中"), ("agent", "J", 8)):
+        _step(db, pr1.id, *row)
+    _gate(db, pr1.id, "open_escrow", 92)
+    _gate(db, pr1.id, "close_escrow", 75)
+    _gate(db, pr1.id, "start", 50)
+    _utilities(db, pr1.id, "on", "David", 60)
+    _inspection(db, pr1.id, "框架检查", 20, "passed")
+    _inspection(db, pr1.id, "屋顶检查", 14, "passed")
+    _inspection(db, pr1.id, "水电粗装检查", -5, "scheduled", note="师傅说下周走完线约")
     _analysis(db, pr1, p1, v1, "买前分析", tier="medium", purchase=185000, sale=325000, months=5, current=True)
 
     # ===== 2. 在建 · 落后 · Parkville =====
@@ -193,8 +249,17 @@ def seed(db: Session) -> None:
     _file(db, pr2.id, "变更单_暖通管道改线.pdf", "change_order", "施工", d(-40), "Comfort Air", 1800)
     _file(db, pr2.id, "许可证复检通知.pdf", "permit", "施工", d(-18), "Platte County")
     _file(db, pr2.id, "设计方案_终稿.pdf", "drawing", "施工", d(-140), uploaded_by="设计师")
-    for k, who, ago in (("view", "L", 175), ("open_escrow", "负责人", 168), ("measure", "L", 150), ("utilities_on", "K", 145), ("agent", "J", 30)):
+    for k, who, ago in (("view", "L", 175), ("measure", "L", 150), ("design_final", "设计师", 140), ("permit_apply", "Z", 138), ("agent", "J", 30)):
         _step(db, pr2.id, k, who, ago)
+    _gate(db, pr2.id, "open_escrow", 168)
+    _gate(db, pr2.id, "close_escrow", 160)
+    _gate(db, pr2.id, "start", 140)
+    _file(db, pr2.id, "permit申请回执_Platte.pdf", "permit_application", "施工", d(-138), "Platte County", uploaded_by="Z")
+    _photo(db, pr2.id, "progress", "进度", 25, "PM", 2)
+    _utilities(db, pr2.id, "on", "Jessie", 145)
+    _inspection(db, pr2.id, "框架检查", 90, "passed")
+    _inspection(db, pr2.id, "水电检查（管道走向）", 18, "failed", fixer="PM + Comfort Air", note="管道走向与图不符，改线后复检")
+    _inspection(db, pr2.id, "水电复检", -3, "scheduled")
     _analysis(db, pr2, p2, v2, "买前分析", tier="medium", purchase=210000, sale=340000, months=4, current=True)
 
     # ===== 3. 在建 · 有风险（超支）· NE 43rd =====
@@ -217,8 +282,13 @@ def seed(db: Session) -> None:
     _file(db, pr3.id, "变更单_地基西侧加桩.pdf", "change_order", "施工", d(-30), "Foundation Masters", 12000)
     _file(db, pr3.id, "设计方案_v1.pdf", "drawing", "施工", d(-85), uploaded_by="设计师")
     _file(db, pr3.id, "地基检查_通过.pdf", "inspection_report", "施工", d(-25), "KC Building Dept", uploaded_by="Z")
-    for k, who, ago in (("view", "L", 115), ("open_escrow", "负责人", 108), ("measure", "L", 90), ("utilities_on", "K", 88)):
+    for k, who, ago in (("view", "L", 115), ("measure", "L", 90), ("design_final", "设计师", 84), ("permit_apply", "Z", 82)):
         _step(db, pr3.id, k, who, ago)
+    _gate(db, pr3.id, "open_escrow", 108)
+    _gate(db, pr3.id, "close_escrow", 100)
+    _gate(db, pr3.id, "start", 80)
+    _utilities(db, pr3.id, "on", "David", 88, blocker_gas="Spire 要房主到场验表，约了下周")
+    _inspection(db, pr3.id, "地基检查", 25, "passed")
     _analysis(db, pr3, p3, v3, "买前分析", tier="medium", purchase=142000, sale=255000, months=4, current=True)
 
     # ===== 4. 线索 · 热 · 待成交 · The Bat House =====
@@ -262,12 +332,29 @@ def seed(db: Session) -> None:
     _file(db, pr6.id, "成交结算单.pdf", "sale_closing", "卖出", d(-118), "Title Co.", 241000)
     _file(db, pr6.id, "项目利润报表.docx", "report", "通用", d(-110), mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     _file(db, pr6.id, "贷款文件.pdf", "loan_doc", "买入", d(-300), uploaded_by="D")
+    _file(db, pr6.id, "房屋保险单.pdf", "insurance", "通用", d(-305), "State Farm", uploaded_by="K", expires_at=d(60))
     _file(db, pr6.id, "设计方案.pdf", "drawing", "施工", d(-290), uploaded_by="设计师")
     _file(db, pr6.id, "终检_通过.pdf", "inspection_report", "施工", d(-170), "Clay County", uploaded_by="Z")
     _file(db, pr6.id, "卖方披露.pdf", "seller_disclosure", "卖出", d(-150), uploaded_by="K")
-    for k, who, ago in (("view", "L", 330), ("open_escrow", "负责人", 322), ("measure", "L", 300), ("utilities_on", "K", 298), ("agent", "J", 200),
-                        ("final", "Z", 170), ("staging", "J", 165), ("mow", "A", 162), ("offer", "负责人", 150), ("sign", "D", 120), ("services_off", "K", 115)):
+    _file(db, pr6.id, "量尺记录.pdf", "measure_note", "买入", d(-300), uploaded_by="L")
+    _file(db, pr6.id, "设计定稿.pdf", "drawing_final", "施工", d(-285), uploaded_by="设计师")
+    _file(db, pr6.id, "permit申请回执.pdf", "permit_application", "施工", d(-283), "Clay County", uploaded_by="Z")
+    _file(db, pr6.id, "买家offer_241k.pdf", "offer", "卖出", d(-150), "买家 Miller", 241000, uploaded_by="J")
+    _file(db, pr6.id, "卖房文件包.pdf", "sale_docs", "卖出", d(-140), "Title Co.", uploaded_by="S")
+    _file(db, pr6.id, "签署版卖房文件.pdf", "sale_signed", "卖出", d(-120), "Title Co.", uploaded_by="D")
+    _photo(db, pr6.id, "view", "看房", 330, "L", 2)
+    _photo(db, pr6.id, "progress", "进度", 220, "PM", 3)
+    _photo(db, pr6.id, "staging", "staging", 165, "J", 3)
+    _photo(db, pr6.id, "mow", "剪草后", 158, "园丁", 1)
+    for k, who, ago in (("view", "L", 330), ("measure", "L", 300), ("design_final", "设计师", 285), ("permit_apply", "Z", 283), ("prep_work", "PM", 282),
+                        ("progress", "PM", 200), ("agent", "J", 200), ("staging", "J", 165), ("mow", "A", 158), ("sign", "D", 120)):
         _step(db, pr6.id, k, who, ago)
+    for g, ago in (("open_escrow", 322), ("close_escrow", 300), ("start", 280), ("final", 170), ("offer", 150), ("closed", 118)):
+        _gate(db, pr6.id, g, ago)
+    _utilities(db, pr6.id, "off", "David", 115)
+    _inspection(db, pr6.id, "框架检查", 240, "passed")
+    _inspection(db, pr6.id, "水电检查", 205, "passed")
+    _inspection(db, pr6.id, "final 检查", 170, "passed", is_final=True)
     _analysis(db, pr6, p6, v6, "买前分析", tier="medium", purchase=128000, sale=235000, months=5, current=False)
     _analysis(db, pr6, p6, v6, "复盘：实际值", tier="medium", purchase=128000, sale=241000, months=6, current=True,
               overrides={"rehab_items": [{"category": c, "label": c, "amount": a, "note": "实际支出"} for c, a in
@@ -294,6 +381,28 @@ def seed(db: Session) -> None:
     _file(db, pr7.id, "挂牌协议_Compass.pdf", "listing_agreement", "卖出", d(-240), "Compass")
     _file(db, pr7.id, "成交结算单.pdf", "sale_closing", "卖出", d(-195), "Escrow Co.", 1120000)
     _file(db, pr7.id, "项目利润报表.docx", "report", "通用", d(-190), mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    _file(db, pr7.id, "贷款文件.pdf", "loan_doc", "买入", d(-425), uploaded_by="D")
+    _file(db, pr7.id, "房屋保险单.pdf", "insurance", "通用", d(-428), "Farmers", uploaded_by="K", expires_at=d(-63))
+    _file(db, pr7.id, "设计方案_终稿.pdf", "drawing", "施工", d(-410), uploaded_by="设计师")
+    _file(db, pr7.id, "卖方披露.pdf", "seller_disclosure", "卖出", d(-230), uploaded_by="K")
+    _file(db, pr7.id, "量尺记录.pdf", "measure_note", "买入", d(-418), uploaded_by="L")
+    _file(db, pr7.id, "设计定稿.pdf", "drawing_final", "施工", d(-405), uploaded_by="设计师")
+    _file(db, pr7.id, "permit申请回执_LADBS.pdf", "permit_application", "施工", d(-404), "LADBS", uploaded_by="Z")
+    _file(db, pr7.id, "买家offer_1.12M.pdf", "offer", "卖出", d(-215), "买家 Patel", 1120000, uploaded_by="J")
+    _file(db, pr7.id, "卖房文件包.pdf", "sale_docs", "卖出", d(-210), "Escrow Co.", uploaded_by="W")
+    _file(db, pr7.id, "签署版卖房文件.pdf", "sale_signed", "卖出", d(-200), "Escrow Co.", uploaded_by="D")
+    _photo(db, pr7.id, "view", "看房", 450, "L", 2)
+    _photo(db, pr7.id, "prep_work", "清理拆除", 402, "PM", 2)
+    _photo(db, pr7.id, "progress", "进度", 320, "PM", 5)
+    _photo(db, pr7.id, "staging", "staging", 245, "J", 4)
+    _photo(db, pr7.id, "mow", "剪草后", 238, "园丁", 1)
+    for k, who, ago in (("view", "L", 450), ("measure", "L", 418), ("design_final", "设计师", 405), ("permit_apply", "Z", 404), ("prep_work", "PM", 402),
+                        ("progress", "PM", 300), ("agent", "J", 280), ("staging", "J", 245), ("mow", "A", 238), ("sign", "D", 200)):
+        _step(db, pr7.id, k, who, ago)
+    _utilities(db, pr7.id, "off", "David", 195)
+    _inspection(db, pr7.id, "final 检查", 250, "passed", is_final=True)
+    for g, ago in (("open_escrow", 440), ("close_escrow", 420), ("start", 400), ("final", 250), ("offer", 215), ("closed", 195)):
+        _gate(db, pr7.id, g, ago)
     _analysis(db, pr7, p7, v7, "买前分析", tier="heavy", purchase=760000, sale=1150000, months=6, current=False)
     _analysis(db, pr7, p7, v7, "复盘：实际值", tier="heavy", purchase=760000, sale=1120000, months=7, current=True, note="实际成交 1,120,000")
 
@@ -309,6 +418,102 @@ def seed(db: Session) -> None:
     _file(db, pr8.id, "业主还价_760k.pdf", "other", "通用", d(-2), "业主 Kim", 760000, source="upload")
     _analysis(db, pr8, p8, v8, "出价 735k", tier="heavy", purchase=735000, sale=1080000, months=6, current=True)
     _analysis(db, pr8, p8, v8, "若接受还价 760k", tier="heavy", purchase=760000, sale=1080000, months=6, current=False)
+
+    # ===== 9. 在建 · 挂牌中 · N Holmes（全流程走到第五段，数据最全）=====
+    p9, v9 = _create_property(db, provider, L[8])
+    _owner_contact(p9, "(816) 555-0142", "anderson.j@example.com")
+    _conflict(db, p9, "year_built", "1961", "Lark 表按评估报告写的")
+    pr9 = models.Project(property_id=p9.id, name="N Holmes St", strategy="flip", stage="active", substage="listing",
+                         purchase_price=168000, target_arv=289000,
+                         purchase_date=d(-150), construction_start=d(-128), construction_end=d(-22), list_date=d(-9),
+                         risks="无遗留施工风险。挂牌后两周内若无 offer，考虑降价 $5,000。",
+                         notes="三卧两卫牧场式。厨房全新、主卫扩建、全屋地板。final 一次通过。staging 用了 Modern Farmhouse 风格，agent 说看房反馈好。")
+    db.add(pr9); db.flush()
+    _budget(db, pr9.id, {"拆除": 5000, "厨房": 19000, "卫浴": 15000, "地板": 8500, "油漆": 6000, "屋顶": 7000, "电": 6500, "水": 5000,
+                         "门窗": 6000, "景观": 3500, "许可与设计": 2200, "应急": 6000, "持有成本": 7500})
+    _expenses(db, pr9.id, rnd, {"拆除": 4900, "厨房": 19800, "卫浴": 14600, "地板": 8300, "油漆": 5900, "屋顶": 7100, "电": 6200, "水": 5100,
+                                "门窗": 6100, "景观": 3400, "许可与设计": 2200, "应急": 1800, "持有成本": 7200}, d(-128), d(-15))
+    _buy_files(db, pr9.id, -150, "卖方 Anderson", 168000)
+    _file(db, pr9.id, "贷款文件_签署版.pdf", "loan_doc", "买入", d(-160), "Heartland Bank", uploaded_by="D")
+    _file(db, pr9.id, "房屋保险单_Allstate.pdf", "insurance", "通用", d(-158), "Allstate", uploaded_by="K", expires_at=d(207))
+    _file(db, pr9.id, "设计方案_终稿.pdf", "drawing", "施工", d(-140), uploaded_by="设计师")
+    _file(db, pr9.id, "施工许可证_Clay.pdf", "permit", "施工", d(-132), "Clay County", uploaded_by="Z")
+    _file(db, pr9.id, "总包合同_Westside.pdf", "contractor_contract", "施工", d(-127), "Westside Builders", 62000)
+    _file(db, pr9.id, "厨房发票_HomeDepot.pdf", "invoice", "施工", d(-70), "Home Depot", 19800)
+    _file(db, pr9.id, "变更单_主卫扩建.pdf", "change_order", "施工", d(-60), "Westside Builders", 3200)
+    _file(db, pr9.id, "框架检查_通过.pdf", "inspection_report", "施工", d(-95), "Clay County", uploaded_by="Z")
+    _file(db, pr9.id, "final_通过.pdf", "inspection_report", "施工", d(-22), "Clay County", uploaded_by="Z")
+    _file(db, pr9.id, "挂牌协议_KW.pdf", "listing_agreement", "卖出", d(-9), "Keller Williams", uploaded_by="J")
+    _file(db, pr9.id, "量尺记录_1640sqft.pdf", "measure_note", "买入", d(-148), uploaded_by="L")
+    _file(db, pr9.id, "设计定稿.pdf", "drawing_final", "施工", d(-140), uploaded_by="设计师")
+    _file(db, pr9.id, "permit申请回执_Clay.pdf", "permit_application", "施工", d(-138), "Clay County", uploaded_by="Z")
+    _photo(db, pr9.id, "view", "看房", 172, "L", 3)
+    _photo(db, pr9.id, "prep_work", "清理拆除", 136, "PM", 2)
+    _photo(db, pr9.id, "progress", "进度", 60, "PM", 6)
+    _photo(db, pr9.id, "staging", "staging", 14, "J", 5)
+    _photo(db, pr9.id, "mow", "剪草后", 5, "园丁", 1)
+    for row in (("view", "L", 172), ("measure", "L", 148, "量尺 1,640 sqft，估装修 $95k"), ("design_final", "设计师", 140), ("permit_apply", "Z", 138),
+                ("prep_work", "PM", 136), ("progress", "PM", 30, "全部完工，等 final"), ("agent", "J", 40), ("staging", "J", 14, "Modern Farmhouse"), ("mow", "A", 5)):
+        _step(db, pr9.id, *row)
+    for g, ago in (("open_escrow", 165), ("close_escrow", 150), ("start", 128), ("final", 22)):
+        _gate(db, pr9.id, g, ago)
+    _utilities(db, pr9.id, "on", "Jessie", 149)
+    _inspection(db, pr9.id, "框架检查", 95, "passed")
+    _inspection(db, pr9.id, "水电检查", 66, "passed")
+    _inspection(db, pr9.id, "保温检查", 50, "passed")
+    _inspection(db, pr9.id, "final 检查", 22, "passed", is_final=True, note="一次通过")
+    _analysis(db, pr9, p9, v9, "买前分析", tier="medium", purchase=168000, sale=289000, months=5, current=False)
+    _analysis(db, pr9, p9, v9, "挂牌前复核", tier="medium", purchase=168000, sale=289000, months=6, current=True, note="按实际支出复核，利润率仍在目标内")
+
+    # ===== 10. 在建 · 等 permit · Pasadena Ave（第三段，设计定稿了、permit 递了还没下来）=====
+    p10, v10 = _create_property(db, provider, L[9])
+    _owner_contact(p10, "(323) 555-0119", None)
+    pr10 = models.Project(property_id=p10.id, name="Pasadena Ave", strategy="flip", stage="active", substage="construction",
+                          purchase_price=690000, target_arv=1020000,
+                          purchase_date=d(-33), construction_start=None, construction_end=d(150),
+                          risks="LADBS 审批排队，已等 24 天。加建阳台部分可能要补交结构计算。",
+                          notes="1925 年西班牙式。设计定稿：保留拱门与瓦顶，厨房打通，主卧加阳台。permit 递交后先做清理和非结构拆除。")
+    db.add(pr10); db.flush()
+    _budget(db, pr10.id, {"拆除": 11000, "结构": 18000, "厨房": 52000, "卫浴": 36000, "地板": 20000, "油漆": 13000, "暖通": 22000,
+                          "电": 15000, "水": 11000, "外立面": 16000, "景观": 8000, "许可与设计": 9500, "应急": 20000, "持有成本": 38000})
+    _expenses(db, pr10.id, rnd, {"拆除": 6200, "许可与设计": 9500, "持有成本": 6100}, d(-30), d(-2))
+    _buy_files(db, pr10.id, -33, "卖方 Thompson Trust", 690000, inspector="LA Home Inspectors")
+    _file(db, pr10.id, "贷款文件_签署版.pdf", "loan_doc", "买入", d(-40), "First Republic", uploaded_by="D")
+    _file(db, pr10.id, "房屋保险单_Farmers.pdf", "insurance", "通用", d(-38), "Farmers", uploaded_by="K", expires_at=d(327))
+    _file(db, pr10.id, "设计方案_定稿.pdf", "drawing", "施工", d(-27), uploaded_by="设计师")
+    _file(db, pr10.id, "permit申请回执_LADBS.pdf", "permit_application", "施工", d(-24), "LADBS", uploaded_by="Z")
+    _file(db, pr10.id, "量尺记录_2140sqft.pdf", "measure_note", "买入", d(-31), uploaded_by="L")
+    _file(db, pr10.id, "设计定稿.pdf", "drawing_final", "施工", d(-27), uploaded_by="设计师")
+    _photo(db, pr10.id, "view", "看房", 60, "L", 4)
+    _photo(db, pr10.id, "prep_work", "清理拆除", 12, "PM", 3)
+    _file(db, pr10.id, "拆除合同_LA_Demo.pdf", "contractor_contract", "施工", d(-20), "LA Demo Co.", 11000)
+    for row in (("view", "L", 60), ("measure", "L", 31, "2,140 sqft"), ("design_final", "设计师", 27, "保留拱门瓦顶，厨房打通"), ("permit_apply", "Z", 24, "LADBS 在线递交，含结构图"),
+                ("prep_work", "PM", 12, "清理完，非结构墙已拆")):
+        _step(db, pr10.id, *row)
+    for g, ago in (("open_escrow", 55), ("close_escrow", 33)):
+        _gate(db, pr10.id, g, ago)
+    _utilities(db, pr10.id, "on", "David", 31)
+    _analysis(db, pr10, p10, v10, "买前分析", tier="heavy", purchase=690000, sale=1020000, months=7, current=True)
+
+    # 在建项目灌入采购清单：关键波次部分已齐，方便演示「水电检查前」证据
+    from .routers.procurement import ensure_procurement
+    for pr in (pr6, pr7):
+        for r in ensure_procurement(db, pr.id):
+            r.status = "received"
+            r.updated_by = "J"
+    for pr in (pr1, pr2, pr3, pr9, pr10):
+        rows = ensure_procurement(db, pr.id)
+        for r in rows:
+            if r.wave == "before_rough":
+                # 只有 NE 43rd（pr3）留一项“已下单”演示“材料没齐”，其余在建都到货
+                r.status = "ordered" if (pr.id == pr3.id and r.name.startswith("岛台灯")) else "received"
+            elif r.wave == "long_lead":
+                r.status = rnd.choice(["pending_spec", "pending_order", "ordered", "exception"])
+            elif r.wave == "after_waterproof":
+                r.status = rnd.choice(["pending_spec", "pending_order", "pending_order"])
+            else:
+                r.status = "pending_spec"
+            r.updated_by = "J"
 
     db.commit()
 

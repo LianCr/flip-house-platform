@@ -28,6 +28,7 @@ import { dateStr, money, pct, text } from '../lib/format';
 import { useMeta } from '../lib/meta';
 import ReviewTag from '../components/ReviewTag';
 import OwnerTag from '../components/OwnerTag';
+import { useRole } from '../lib/role';
 
 type FieldState = { value: string; source: string; confidence: number | null; note: string | null; label: string; field: string };
 
@@ -39,6 +40,7 @@ const GROUPS: { title: string; keys: string[]; cols: number }[] = [
 const LOW_CONFIDENCE = 0.8;
 
 export default function AddProject() {
+  const role = useRole();
   const navigate = useNavigate();
   const meta = useMeta();
   const flash = useFlash();
@@ -136,6 +138,9 @@ export default function AddProject() {
     );
   };
 
+  if (!role.can('create_project')) {
+    return <ContentLayout header={<Header variant="h1">新建项目</Header>}><Alert type="warning" header="你的身份不能新建项目">新建项目由 J（Jessie）或统筹、决策级别的人做。你现在是 {role.actor}（{role.tierLabel}）。</Alert></ContentLayout>;
+  }
   return (
     <ContentLayout
       breadcrumbs={<BreadcrumbGroup items={[{ text: '工作台', href: '/' }, { text: '新建项目', href: '/projects/new' }]} onFollow={(e) => { e.preventDefault(); navigate(e.detail.href); }} />}

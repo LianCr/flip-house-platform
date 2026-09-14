@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from .common import get_actor, log_update, project_out, set_field_with_source
+from .common import allowed, get_actor, log_update, project_out, require, set_field_with_source
+
+MONEY_FIELDS = {"purchase_price", "target_arv", "sale_price"}
 
 DATE_LABEL = {"purchase_price": "买入价", "target_arv": "目标售价", "purchase_date": "买入日期", "construction_start": "开工日期",
               "construction_end": "计划完工", "list_date": "挂牌日期", "sale_date": "成交日期", "sale_price": "成交价",
@@ -23,7 +25,7 @@ def _get(db: Session, project_id: int) -> models.Project:
 
 
 @router.get("", response_model=list[schemas.ProjectOut])
-def list_projects(stage: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)):
+def list_projects(stage: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
     stmt = select(models.Project).order_by(models.Project.updated_at.desc())
     if stage:
         stmt = stmt.where(models.Project.stage == stage)
@@ -31,11 +33,12 @@ def list_projects(stage: Optional[str] = None, q: Optional[str] = None, db: Sess
     if q:
         ql = q.lower()
         items = [p for p in items if ql in p.name.lower() or ql in p.property.address_std.lower()]
-    return [project_out(db, p) for p in items]
+    return [project_out(db, p, actor) for p in items]
 
 
 @router.post("", response_model=schemas.ProjectOut, status_code=201)
 def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    require(actor, "create_project", what="新建项目")
     prop = None
     if body.reuse_property_id:
         prop = db.get(models.Property, body.reuse_property_id)
@@ -70,15 +73,17 @@ def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db), a
     if body.create_analysis:
         from .analyses import create_analysis
         create_analysis(db, project, None, None)
+    from .procurement import ensure_procurement
+    ensure_procurement(db, project.id)
     log_update(db, project.id, actor, "project", f"新建了项目：{project.name}")
     db.commit()
     db.refresh(project)
-    return project_out(db, project)
+    return project_out(db, project, actor)
 
 
 @router.get("/{project_id}", response_model=schemas.ProjectOut)
-def get_project(project_id: int, db: Session = Depends(get_db)):
-    return project_out(db, _get(db, project_id))
+def get_project(project_id: int, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    return project_out(db, _get(db, project_id), actor)
 
 
 @router.patch("/{project_id}", response_model=schemas.ProjectOut)
@@ -86,6 +91,10 @@ def patch_project(project_id: int, body: schemas.ProjectPatch, db: Session = Dep
     p = _get(db, project_id)
     data = body.model_dump(exclude_unset=True)
     clear = data.pop("clear_status_override", False)
+    if MONEY_FIELDS & set(data):
+        require(actor, "edit_money", what="改价格")
+    if set(data) - MONEY_FIELDS or clear:
+        require(actor, "edit_project", what="改项目信息")
     changed = [DATE_LABEL.get(k, k) for k, v in data.items() if getattr(p, k) != v]
     for k, v in data.items():
         setattr(p, k, v)
@@ -96,11 +105,12 @@ def patch_project(project_id: int, body: schemas.ProjectPatch, db: Session = Dep
         log_update(db, project_id, actor, "project", f"修改了{'、'.join(changed[:4])}{'等' if len(changed) > 4 else ''}")
     db.commit()
     db.refresh(p)
-    return project_out(db, p)
+    return project_out(db, p, actor)
 
 
 @router.delete("/{project_id}", status_code=204)
-def delete_project(project_id: int, db: Session = Depends(get_db)):
+def delete_project(project_id: int, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    require(actor, "delete_project", what="删除项目")
     p = _get(db, project_id)
     db.delete(p)
     db.commit()

@@ -16,7 +16,6 @@ import Spinner from '@cloudscape-design/components/spinner';
 import Tabs from '@cloudscape-design/components/tabs';
 import StatusBadge from '../../components/StatusBadge';
 import CoverImage from '../../components/CoverImage';
-import WorkflowCards from '../../components/WorkflowCards';
 import ReviewTag from '../../components/ReviewTag';
 import OwnerTag from '../../components/OwnerTag';
 import { Meter } from '../../components/charts';
@@ -24,6 +23,7 @@ import { api, Project } from '../../api/client';
 import { useFlash } from '../../lib/flash';
 import { dateStr, money, num, pct } from '../../lib/format';
 import { labelOf, useMeta } from '../../lib/meta';
+import { useRole } from '../../lib/role';
 import OverviewTab from './OverviewTab';
 import AnalysisTab from './AnalysisTab';
 import DataTab from './DataTab';
@@ -39,6 +39,7 @@ const short = (d: string | null) => (d ? d.slice(5).replace('-', '/') : '—');
 /** 身份卡右侧“交易”一栏：按阶段说结论。 */
 function DealSummary({ p }: { p: Project }) {
   const prop = p.property;
+  if (p.money_hidden) return <Box color="text-body-secondary">金额对你的身份不显示</Box>;
   if (p.stage === 'lead') {
     return (
       <SpaceBetween size="xxs">
@@ -48,8 +49,8 @@ function DealSummary({ p }: { p: Project }) {
     );
   }
   if (p.stage === 'portfolio') {
-    const profit = p.sale_price != null ? p.sale_price - (p.purchase_price ?? 0) - p.budget_spent : null;
-    const cost = (p.purchase_price ?? 0) + p.budget_spent;
+    const profit = p.sale_price != null ? p.sale_price - (p.purchase_price ?? 0) - (p.budget_spent ?? 0) : null;
+    const cost = (p.purchase_price ?? 0) + (p.budget_spent ?? 0);
     return (
       <SpaceBetween size="xxs">
         <Box fontSize="heading-m" fontWeight="bold">买入 {money(p.purchase_price)} → 成交 {money(p.sale_price)}</Box>
@@ -57,7 +58,7 @@ function DealSummary({ p }: { p: Project }) {
       </SpaceBetween>
     );
   }
-  const cost = (p.purchase_price ?? 0) + Math.max(p.budget_planned, p.budget_spent);
+  const cost = (p.purchase_price ?? 0) + Math.max(p.budget_planned ?? 0, p.budget_spent ?? 0);
   const profit = p.target_arv != null ? p.target_arv - cost : null;
   return (
     <SpaceBetween size="xxs">
@@ -93,6 +94,7 @@ export default function ProjectPage() {
   const navigate = useNavigate();
   const meta = useMeta();
   const flash = useFlash();
+  const role = useRole();
   const [params, setParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [editing, setEditing] = useState(false);
@@ -104,6 +106,10 @@ export default function ProjectPage() {
   if (!project) return <Box padding="xxl" textAlign="center"><Spinner size="large" /></Box>;
 
   const tab = params.get('tab') ?? 'overview';
+  const step = params.get('step');
+  const action = params.get('action');
+  const section = params.get('section');
+  const focus = params.get('focus');
   const prop = project.property;
   const specs = [prop.year_built ? `${prop.year_built} 年` : null, prop.sqft ? `${num(prop.sqft)} sqft` : null, prop.beds != null ? `${prop.beds} 卧 ${prop.baths_full ?? 0} 卫` : null, prop.style].filter(Boolean).join(' · ');
 
@@ -120,8 +126,8 @@ export default function ProjectPage() {
                 description={<span>{prop.address_std}{specs ? ` · ${specs}` : ''}</span>}
                 actions={
                   <SpaceBetween direction="horizontal" size="xs">
-                    <Button onClick={() => setEditing(true)}>编辑</Button>
-                    <ButtonDropdown items={[{ id: 'delete', text: '删除项目' }]} onItemClick={({ detail }) => { if (detail.id === 'delete') setConfirmDelete(true); }}>操作</ButtonDropdown>
+                    {role.can('edit_project') && <Button onClick={() => setEditing(true)}>编辑</Button>}
+                    {role.can('delete_project') && <ButtonDropdown items={[{ id: 'delete', text: '删除项目' }]} onItemClick={({ detail }) => { if (detail.id === 'delete') setConfirmDelete(true); }}>操作</ButtonDropdown>}
                   </SpaceBetween>
                 }
               >
@@ -150,16 +156,15 @@ export default function ProjectPage() {
       }
     >
       <SpaceBetween size="l">
-        <WorkflowCards project={project} />
         <Tabs
           activeTabId={tab}
-          onChange={({ detail }) => setParams({ tab: detail.activeTabId })}
+          onChange={({ detail }) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('tab', detail.activeTabId); return n; })}
           tabs={[
-            { id: 'overview', label: '总览', content: <OverviewTab project={project} reload={reload} /> },
-            { id: 'analysis', label: '分析', content: <AnalysisTab project={project} reload={reload} /> },
-            { id: 'data', label: '数据', content: <DataTab projectId={pid} reload={reload} /> },
+            { id: 'overview', label: '总览', content: <OverviewTab project={project} reload={reload} deepLink={{ step, action }} focus={focus} /> },
+            ...(role.canReadMoney ? [{ id: 'analysis', label: '分析', content: <AnalysisTab project={project} reload={reload} /> }] : []),
+            ...(role.tier !== 'grey' ? [{ id: 'data', label: '数据', content: <DataTab projectId={pid} reload={reload} section={section} /> }] : []),
             { id: 'files', label: '文件', content: <FilesTab projectId={pid} /> },
-            { id: 'budget', label: '预算', content: <BudgetTab projectId={pid} reload={reload} /> },
+            ...(role.canReadMoney || role.can('procurement') ? [{ id: 'budget', label: '预算', content: <BudgetTab projectId={pid} reload={reload} section={section} /> }] : []),
           ]}
         />
       </SpaceBetween>

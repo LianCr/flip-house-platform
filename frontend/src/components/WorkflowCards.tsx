@@ -47,14 +47,14 @@ export default function WorkflowCards({ project }: { project: Project }) {
   } else if (project.stage === 'active') {
     const left = days(new Date().toISOString().slice(0, 10), project.construction_end);
     cards = [
-      { title: '预算已用', value: project.budget_planned ? pct(project.budget_used_pct) : '无预算', note: project.budget_planned ? `${money(project.budget_spent)} / ${money(project.budget_planned)}` : '先建预算项才能算占比', href: `${base}?tab=budget`, action: '看明细', meter: project.budget_planned ? { value: project.budget_spent, max: project.budget_planned } : undefined },
+      { title: '预算已用', value: (project.budget_planned ?? 0) ? pct(project.budget_used_pct) : '无预算', note: (project.budget_planned ?? 0) ? `${money((project.budget_spent ?? 0))} / ${money((project.budget_planned ?? 0))}` : '先建预算项才能算占比', href: `${base}?tab=budget`, action: '看明细', meter: (project.budget_planned ?? 0) ? { value: (project.budget_spent ?? 0), max: (project.budget_planned ?? 0) } : undefined },
       { title: '距计划完工', value: left == null ? '未设' : left >= 0 ? `${left} 天` : `超期 ${-left} 天`, note: project.construction_end ? `计划 ${project.construction_end.replace(/-/g, '/')} 完工` : '在“编辑”里设置计划完工日', href: base, action: '去编辑' },
       files,
     ];
   } else {
-    const profit = project.sale_price != null ? project.sale_price - (project.purchase_price ?? 0) - project.budget_spent : null;
+    const profit = project.sale_price != null ? project.sale_price - (project.purchase_price ?? 0) - (project.budget_spent ?? 0) : null;
     cards = [
-      { title: '实际利润', value: profit == null ? '未知' : money(profit), note: project.sale_price ? `成交 ${money(project.sale_price)}，支出 ${money(project.budget_spent)}` : '填成交价后自动计算', href: `${base}?tab=budget`, action: '看账目' },
+      { title: '实际利润', value: profit == null ? '未知' : money(profit), note: project.sale_price ? `成交 ${money(project.sale_price)}，支出 ${money((project.budget_spent ?? 0))}` : '填成交价后自动计算', href: `${base}?tab=budget`, action: '看账目' },
       { title: '总工期', value: (() => { const d = days(project.construction_start, project.construction_end); return d == null ? '未知' : `${d} 天`; })(), note: '开工到完工', href: base, action: '看日期' },
       files,
     ];

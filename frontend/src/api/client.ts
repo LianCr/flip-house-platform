@@ -10,20 +10,35 @@ export interface Meta {
   sources: Option[];
   property_fields: { key: string; label: string; type: string }[];
   people: { code: string; label: string; role: string }[];
+  roles: { code: string; label: string; tier: string; duties: string }[];
+  tiers: Record<string, { label: string; color: string; order: number }>;
+  permissions: Record<string, string[]>;
   owner_map: Record<string, string[]>;
   file_default_owner: Record<string, string>;
-  stage_checklist: { key: string; label: string; items: { key: string; title: string; owners: string[]; evidence: string; gate?: boolean }[] }[];
+  stage_checklist: { key: string; label: string; short: string; items: { key: string; title: string; owners: string[]; evidence: string; gate?: boolean; confirm?: string[]; deliverable?: Deliverable }[] }[];
+  permit_rule: { need: string[]; no_need: string[] };
+  utility_kinds: Option[];
+  utility_statuses: Option[];
+  inspection_results: Option[];
+  procurement_waves: Option[];
+  procurement_statuses: Option[];
 }
 
+export interface Deliverable { kind: 'file' | 'photo' | 'field' | 'record' | 'confirm' | 'tick'; label: string; doc_type?: string | null; field?: string | null; record?: string | null }
 export interface StepItem {
-  key: string; title: string; owners: string[]; gate: boolean; done: boolean; how: 'auto' | 'manual' | null;
+  key: string; title: string; owners: string[]; gate: boolean; confirm: string[]; confirmed: string[]; done: boolean; how: 'auto' | 'manual' | 'manual_override' | null;
+  deliverable: Deliverable | null; evidence_hint: string | null;
   evidence: string | null; can_auto: boolean; done_by: string | null; done_at: string | null; note: string | null;
 }
+export interface StageProgress {
+  key: string; label: string; short: string; done: number; total: number; gate_title: string | null; gate_done: boolean; gate_confirmed: string[]; gate_at: string | null;
+}
 export interface Steps {
-  stages: { key: string; label: string; items: StepItem[]; done_count: number; total: number }[];
+  stages: { key: string; label: string; short: string; desc?: string | null; items: StepItem[]; done_count: number; total: number; gate_title: string | null; gate_done: boolean; gate_confirmed: string[]; gate_at: string | null }[];
   current_stage: { key: string; label: string; index?: number };
   next_up: { key: string; title: string; owners: string[]; gate: boolean }[];
   earlier_undone: { key: string; title: string; owners: string[]; stage: string }[];
+  stage_progress: StageProgress[];
 }
 export interface Update { id: number; project_id: number; project_name: string | null; actor: string; kind: string; text: string; created_at: string }
 
@@ -61,8 +76,9 @@ export interface Project {
   purchase_price: number | null; target_arv: number | null; purchase_date: string | null; construction_start: string | null;
   construction_end: string | null; list_date: string | null; sale_date: string | null; sale_price: number | null;
   risks: string | null; notes: string | null; created_at: string; updated_at: string; property: PropertyBrief;
-  budget_planned: number; budget_spent: number; budget_used_pct: number | null; missing_fields: string[]; analysis_count: number;
+  budget_planned: number | null; budget_spent: number | null; budget_used_pct: number | null; money_hidden: boolean; missing_fields: string[]; analysis_count: number;
   current_stage: { key: string; label: string } | null; next_up: { key: string; title: string; owners: string[]; gate: boolean }[];
+  stage_progress: StageProgress[]; earlier_undone_count: number;
 }
 
 export interface SourceRec {
@@ -83,8 +99,25 @@ export interface PropertyData {
 
 export interface ProjectFile {
   id: number; project_id: number; filename: string; mime: string | null; size: number; doc_type: string | null; stage: string | null;
-  doc_date: string | null; counterparty: string | null; amount: number | null; source: string; uploaded_by: string | null; uploaded_at: string;
+  doc_date: string | null; counterparty: string | null; amount: number | null; source: string; uploaded_by: string | null; step_key: string | null; expires_at: string | null; uploaded_at: string;
 }
+
+export interface Utility {
+  id: number; project_id: number; kind: string; company: string | null; account_no: string | null; login: string | null; password: string | null;
+  opened_under: string | null; status: string; blocker: string | null; updated_by: string | null; updated_at: string;
+}
+export interface UtilityIn { company: string | null; account_no: string | null; login: string | null; password: string | null; opened_under: string | null; status: string; blocker: string | null }
+export interface Inspection {
+  id: number; project_id: number; name: string; date: string | null; result: string; is_final: boolean; fixer: string | null; note: string | null; recorded_by: string | null; created_at: string;
+}
+
+export interface ProcurementItem {
+  id: number; project_id: number; wave: string; name: string; status: string; note: string | null; sort_order: number; updated_by: string | null; updated_at: string;
+}
+export interface ProcurementSummary {
+  total: number; pending_spec: number; pending_order: number; ordered: number; received: number; exception: number; na: number;
+}
+export interface ProcurementList { items: ProcurementItem[]; summary: ProcurementSummary; template_missing?: boolean }
 
 export interface BudgetLine { id: number; project_id: number; category: string; planned_amount: number; note: string | null }
 export interface Expense { id: number; project_id: number; category: string; amount: number; date: string | null; vendor: string | null; note: string | null; file_id: number | null }
@@ -162,7 +195,16 @@ export const api = {
   deleteAnalysis: (aid: number) => req<void>(`/api/analyses/${aid}`, { method: 'DELETE' }),
   applyAnalysis: (aid: number, body: { mode: 'replace' | 'append'; apply_prices: boolean }) => req<Project>(`/api/analyses/${aid}/apply`, { method: 'POST', body: JSON.stringify(body) }),
   steps: (id: number) => req<Steps>(`/api/projects/${id}/steps`),
-  toggleStep: (id: number, key: string, body: { done: boolean; note?: string | null }) => req<Steps>(`/api/projects/${id}/steps/${key}`, { method: 'POST', body: JSON.stringify(body) }),
+  toggleStep: (id: number, key: string, body: { done: boolean; note?: string | null; confirm_as?: string | null }) => req<Steps>(`/api/projects/${id}/steps/${key}`, { method: 'POST', body: JSON.stringify(body) }),
+  utilities: (id: number) => req<Utility[]>(`/api/projects/${id}/utilities`),
+  saveUtility: (id: number, kind: string, body: UtilityIn) => req<Utility[]>(`/api/projects/${id}/utilities/${kind}`, { method: 'PUT', body: JSON.stringify(body) }),
+  inspections: (id: number) => req<Inspection[]>(`/api/projects/${id}/inspections`),
+  addInspection: (id: number, body: Partial<Inspection>) => req<Inspection[]>(`/api/projects/${id}/inspections`, { method: 'POST', body: JSON.stringify(body) }),
+  patchInspection: (iid: number, body: Partial<Inspection>) => req<Inspection[]>(`/api/inspections/${iid}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteInspection: (iid: number) => req<Inspection[]>(`/api/inspections/${iid}`, { method: 'DELETE' }),
+  procurement: (id: number) => req<ProcurementList>(`/api/projects/${id}/procurement`),
+  initProcurement: (id: number) => req<ProcurementList>(`/api/projects/${id}/procurement/init`, { method: 'POST' }),
+  patchProcurement: (itemId: number, body: { status?: string; note?: string | null }) => req<ProcurementList>(`/api/procurement/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updates: (limit = 30) => req<Update[]>(`/api/updates?limit=${limit}`),
   projectUpdates: (id: number, limit = 30) => req<Update[]>(`/api/projects/${id}/updates?limit=${limit}`),
 };

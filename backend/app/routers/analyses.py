@@ -7,9 +7,13 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..analysis import build_prefill, full_outputs
 from ..db import get_db
-from .common import get_actor
+from .common import get_actor, require
 
-router = APIRouter(prefix="/api", tags=["analysis"])
+
+def _guard(actor: str = Depends(get_actor)) -> None:
+    require(actor, "analysis", what="看或改交易分析")
+
+router = APIRouter(prefix="/api", tags=["analysis"], dependencies=[Depends(_guard)])
 
 
 def _out(a: models.DealAnalysis) -> schemas.AnalysisOut:
@@ -147,4 +151,4 @@ def apply_analysis(aid: int, body: schemas.AnalysisApplyIn, db: Session = Depend
     log_update(db, p.id, actor, "analysis", f"把“{a.name}”应用到项目：目标售价 ${p.target_arv or 0:,.0f}，预算项 {len(by_cat)} 类")
     db.commit()
     db.refresh(p)
-    return project_out(db, p)
+    return project_out(db, p, actor)

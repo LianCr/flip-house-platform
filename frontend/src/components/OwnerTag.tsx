@@ -1,17 +1,21 @@
 import { useMeta } from '../lib/meta';
 import { useActor } from '../lib/actor';
+import { colorOf } from '../lib/role';
 
 /** 蓝色圆标：这一块由谁负责。单字母画圆，多字（设计师 / 园丁 / 负责人 / ？）画胶囊。和黄色评审圆标并排。 */
 export function OwnerDot({ code, title }: { code: string; title?: string }) {
+  const meta = useMeta();
   const single = [...code].length === 1;
+  const color = code === '?' ? '#5f6b7a' : colorOf(meta, code);
+  const tierLabel = meta?.tiers?.[meta?.roles.find((r) => r.code === code)?.tier ?? '']?.label;
   return (
     <span
-      title={title ?? `负责人：${code}`}
+      title={title ?? `${code}${tierLabel ? `（${tierLabel}）` : ''}`}
       aria-label={title ?? `负责人：${code}`}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         minWidth: 22, height: 22, borderRadius: 11, padding: single ? 0 : '0 7px',
-        background: code === '?' ? '#fff' : '#0972d3', color: code === '?' ? '#5f6b7a' : '#fff',
+        background: code === '?' ? '#fff' : color, color: code === '?' ? '#5f6b7a' : '#fff',
         border: code === '?' ? '1px dashed #8d99a8' : 'none',
         fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', fontWeight: 700, fontSize: single ? 13 : 11, lineHeight: 1,
         marginRight: 4, verticalAlign: 'middle', flexShrink: 0, userSelect: 'none', whiteSpace: 'nowrap',

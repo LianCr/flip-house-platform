@@ -23,7 +23,8 @@ export interface AnalysisInputs {
 
 export interface AnalysisOutputs {
   purchase_total: number; purchase_extras_total: number; loan_amount: number; down_payment: number; monthly_payment: number;
-  monthly_costs_total: number; holding_total: number; rehab_total: number; selling_total: number; total_costs: number;
+  monthly_costs_total: number; interest_total: number; principal_paid: number; loan_balance_at_sale: number; cash_returned: number;
+  holding_total: number; rehab_total: number; selling_total: number; total_costs: number;
   total_profit: number; profit_margin_pct: number | null; cash_invested: number; roi_pct: number | null; equity_multiple: number | null;
   sale_price: number; target_margin_pct: number; mao: number; mao_rule70: number;
 }
@@ -38,6 +39,17 @@ export function monthlyPayment(principal: number, ratePct: number, years: number
   return principal * r / (1 - Math.pow(1 + r, -m));
 }
 
+/** 持有 months 个月内付掉的利息与本金（等额本息）。 */
+export function amortize(loan: number, ratePct: number, years: number, months: number): { interest: number; principal: number } {
+  if (loan <= 0 || years <= 0 || months <= 0) return { interest: 0, principal: 0 };
+  const nTot = Math.round(years * 12); const m = Math.min(Math.round(months), nTot); const r = ratePct / 100 / 12;
+  const pay = monthlyPayment(loan, ratePct, years);
+  if (r === 0) return { interest: 0, principal: pay * m };
+  const balance = loan * Math.pow(1 + r, m) - pay * ((Math.pow(1 + r, m) - 1) / r);
+  const principal = loan - balance;
+  return { interest: pay * m - principal, principal };
+}
+
 export function compute(i: AnalysisInputs, priceOverride?: number): Omit<AnalysisOutputs, 'target_margin_pct' | 'mao' | 'mao_rule70'> {
   const price = priceOverride ?? n(i.purchase_price);
   const extras = sum(i.purchase_extras);
@@ -47,18 +59,22 @@ export function compute(i: AnalysisInputs, priceOverride?: number): Omit<Analysi
   const payment = f.enabled ? monthlyPayment(loan, n(f.rate_pct, 7), n(f.years, 30)) : 0;
   const months = n(i.holding_months, 6);
   const monthly = sum(i.monthly_costs);
-  const holding = months * (monthly + payment);
+  const { interest, principal } = f.enabled ? amortize(loan, n(f.rate_pct, 7), n(f.years, 30), months) : { interest: 0, principal: 0 };
+  const holding = months * monthly + interest;   // 本金不是成本，只有利息是
+  const loanBalance = loan - principal;
   const rehab = sum(i.rehab_items);
   const sale = n(i.sale_price);
   const selling = sale * n(i.selling_pct) / 100 + sum(i.selling_extras);
   const total = price + extras + rehab + holding + selling;
   const profit = sale - total;
-  const cash = down + extras + rehab + holding;
+  const cash = down + extras + rehab + holding + principal;   // 已还本金是垫出去的现金
+  const cashReturned = sale - selling - loanBalance;
   return {
     purchase_total: price + extras, purchase_extras_total: extras, loan_amount: loan, down_payment: down, monthly_payment: payment,
-    monthly_costs_total: monthly, holding_total: holding, rehab_total: rehab, selling_total: selling, total_costs: total,
+    monthly_costs_total: monthly, interest_total: interest, principal_paid: principal, loan_balance_at_sale: loanBalance, cash_returned: cashReturned,
+    holding_total: holding, rehab_total: rehab, selling_total: selling, total_costs: total,
     total_profit: profit, profit_margin_pct: total ? profit / total * 100 : null, cash_invested: cash,
-    roi_pct: cash ? profit / cash * 100 : null, equity_multiple: cash ? sale / cash : null, sale_price: sale,
+    roi_pct: cash ? profit / cash * 100 : null, equity_multiple: cash ? cashReturned / cash : null, sale_price: sale,
   };
 }
 

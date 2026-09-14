@@ -3,12 +3,12 @@
 from typing import Optional
 from urllib.parse import unquote
 
-from fastapi import Header
+from fastapi import Header, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
-from ..dictionaries import KEY_FIELDS_FOR_COMPLETENESS, PROPERTY_FIELDS
+from ..dictionaries import KEY_FIELDS_FOR_COMPLETENESS, PERMISSIONS, PROPERTY_FIELDS, tier_of
 from ..status import compute_status
 from ..steps import compute_steps
 
@@ -19,6 +19,21 @@ FIELD_LABELS = {f["key"]: f["label"] for f in PROPERTY_FIELDS}
 def get_actor(x_actor: Optional[str] = Header(default=None)) -> str:
     """当前操作人：前端把顶栏“我是谁”放在 X-Actor 头里（URL 编码）。取不到就是负责人。"""
     return unquote(x_actor) if x_actor else "负责人"
+
+
+def allowed(actor: str, action: str, *extra_ok: str) -> bool:
+    """这个身份能不能做这个动作：级别在名单里、代号在名单里、或调用方额外放行的代号。"""
+    ok = PERMISSIONS.get(action, ["purple", "blue"])
+    return tier_of(actor) in ok or actor in ok or actor in extra_ok
+
+
+def require(actor: str, action: str, *extra_ok: str, what: str | None = None) -> None:
+    if not allowed(actor, action, *extra_ok):
+        raise HTTPException(403, f"{actor} 没有权限{what or action}")
+
+
+def can_read_money(actor: str) -> bool:
+    return allowed(actor, "read_money")
 
 
 def log_update(db: Session, project_id: int, actor: str, kind: str, text: str) -> None:
@@ -44,30 +59,35 @@ def budget_totals(db: Session, project_id: int) -> tuple[float, float]:
     return float(planned), float(spent)
 
 
-def project_out(db: Session, p: models.Project) -> schemas.ProjectOut:
+def project_out(db: Session, p: models.Project, actor: str = "负责人") -> schemas.ProjectOut:
     planned, spent = budget_totals(db, p.id)
     status, reason = compute_status(p, planned, spent)
+    hide = not can_read_money(actor)
+    if hide and "$" in reason:
+        reason = "支出超预算（金额对你隐藏）" if status == "at_risk" else reason
     prop = p.property
     missing = [FIELD_LABELS[k] for k in KEY_FIELDS_FOR_COMPLETENESS if getattr(prop, k) in (None, "")]
-    if p.stage != "lead" and p.purchase_price is None:
+    if not hide and p.stage != "lead" and p.purchase_price is None:
         missing.append("买入价")
-    if p.target_arv is None:
+    if not hide and p.target_arv is None:
         missing.append("目标售价（ARV）")
-    steps = compute_steps(db, p)
+    steps = compute_steps(db, p, hide_money=hide)
     return schemas.ProjectOut(
         id=p.id, name=p.name, strategy=p.strategy, stage=p.stage, substage=p.substage,
         lead_heat=p.lead_heat, status=status, status_reason=reason,
         status_override=p.status_override, status_override_reason=p.status_override_reason,
-        purchase_price=p.purchase_price, target_arv=p.target_arv, purchase_date=p.purchase_date,
+        purchase_price=None if hide else p.purchase_price, target_arv=None if hide else p.target_arv, purchase_date=p.purchase_date,
         construction_start=p.construction_start, construction_end=p.construction_end,
-        list_date=p.list_date, sale_date=p.sale_date, sale_price=p.sale_price,
+        list_date=p.list_date, sale_date=p.sale_date, sale_price=None if hide else p.sale_price,
         risks=p.risks, notes=p.notes, created_at=p.created_at, updated_at=p.updated_at,
         property=schemas.PropertyBrief.model_validate(prop),
-        budget_planned=planned, budget_spent=spent,
-        budget_used_pct=(round(spent / planned * 100, 1) if planned > 0 else None),
+        budget_planned=None if hide else planned, budget_spent=None if hide else spent,
+        budget_used_pct=(None if hide else (round(spent / planned * 100, 1) if planned > 0 else None)),
+        money_hidden=hide,
         missing_fields=missing,
-        analysis_count=len(p.analyses),
+        analysis_count=0 if hide else len(p.analyses),
         current_stage=steps["current_stage"], next_up=steps["next_up"],
+        stage_progress=steps["stage_progress"], earlier_undone_count=len(steps["earlier_undone"]),
     )
 
 

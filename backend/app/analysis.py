@@ -43,6 +43,21 @@ def monthly_payment(principal: float, rate_pct: float, years: float) -> float:
     return principal * r / (1 - (1 + r) ** -n)
 
 
+def amortize(loan: float, rate_pct: float, years: float, months: float) -> tuple[float, float]:
+    """持有 months 个月内付掉的利息与本金（按等额本息摊还）。"""
+    if loan <= 0 or years <= 0 or months <= 0:
+        return 0.0, 0.0
+    n = int(round(years * 12))
+    m = min(int(round(months)), n)
+    r = rate_pct / 100 / 12
+    pay = monthly_payment(loan, rate_pct, years)
+    if r == 0:
+        return 0.0, pay * m
+    balance = loan * (1 + r) ** m - pay * (((1 + r) ** m - 1) / r)
+    principal = loan - balance
+    return pay * m - principal, principal
+
+
 def compute(inputs: dict, price_override: float | None = None) -> dict:
     price = _num(inputs.get("purchase_price")) if price_override is None else price_override
     extras = _sum(inputs.get("purchase_extras"))
@@ -57,7 +72,9 @@ def compute(inputs: dict, price_override: float | None = None) -> dict:
 
     months = _num(inputs.get("holding_months"), 6)
     monthly = _sum(inputs.get("monthly_costs"))
-    holding_total = months * (monthly + payment)
+    interest_total, principal_paid = amortize(loan, rate, years, months) if enabled else (0.0, 0.0)
+    holding_total = months * monthly + interest_total   # 本金不是成本，只有利息是
+    loan_balance_at_sale = loan - principal_paid
 
     rehab_total = _sum(inputs.get("rehab_items"))
     sale = _num(inputs.get("sale_price"))
@@ -66,7 +83,8 @@ def compute(inputs: dict, price_override: float | None = None) -> dict:
 
     total_costs = price + extras + rehab_total + holding_total + selling_total
     profit = sale - total_costs
-    cash_invested = down + extras + rehab_total + holding_total
+    cash_invested = down + extras + rehab_total + holding_total + principal_paid   # 已还本金是垫出去的现金
+    cash_returned = sale - selling_total - loan_balance_at_sale                    # 卖出还完贷款后拿回的现金
 
     return {
         "purchase_total": round(price + extras, 2),
@@ -75,6 +93,10 @@ def compute(inputs: dict, price_override: float | None = None) -> dict:
         "down_payment": round(down, 2),
         "monthly_payment": round(payment, 2),
         "monthly_costs_total": round(monthly, 2),
+        "interest_total": round(interest_total, 2),
+        "principal_paid": round(principal_paid, 2),
+        "loan_balance_at_sale": round(loan_balance_at_sale, 2),
+        "cash_returned": round(cash_returned, 2),
         "holding_total": round(holding_total, 2),
         "rehab_total": round(rehab_total, 2),
         "selling_total": round(selling_total, 2),
@@ -83,7 +105,7 @@ def compute(inputs: dict, price_override: float | None = None) -> dict:
         "profit_margin_pct": round(profit / total_costs * 100, 2) if total_costs else None,
         "cash_invested": round(cash_invested, 2),
         "roi_pct": round(profit / cash_invested * 100, 2) if cash_invested else None,
-        "equity_multiple": round(sale / cash_invested, 2) if cash_invested else None,
+        "equity_multiple": round(cash_returned / cash_invested, 2) if cash_invested else None,
         "sale_price": round(sale, 2),
     }
 

@@ -7,9 +7,13 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..db import get_db
 from ..dictionaries import SUBSTAGES
-from .common import budget_totals
+from .common import budget_totals, get_actor, require
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+def _guard(actor: str = Depends(get_actor)) -> None:
+    require(actor, "dashboard", what="看完整工作台")
+
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(_guard)])
 
 
 @router.get("/summary", response_model=schemas.DashboardSummary)
@@ -73,6 +77,20 @@ def widgets(db: Session = Depends(get_db)):
             if -14 <= delta <= 30:
                 upcoming.append({"project_id": p.id, "project_name": p.name, "date": v, "kind": label, "days": delta,
                                  "overdue": delta < 0 and field in ("construction_end", "list_date")})
+    # 有到期日的文件（保险）：到期前 30 天开始提醒，过期 14 天内还显示
+    names = {p.id: p for p in projects}
+    for f in db.scalars(select(models.ProjectFile).where(models.ProjectFile.expires_at.is_not(None))).all():
+        p = names.get(f.project_id)
+        if not p or p.stage == "portfolio":
+            continue
+        try:
+            d = date.fromisoformat(f.expires_at)
+        except ValueError:
+            continue
+        delta = (d - today).days
+        if -14 <= delta <= 30:
+            label = "保险到期" if f.doc_type == "insurance" else "文件到期"
+            upcoming.append({"project_id": p.id, "project_name": p.name, "date": f.expires_at, "kind": label, "days": delta, "overdue": delta < 0})
     upcoming.sort(key=lambda x: x["date"])
 
     capital = [{"project_id": p.id, "project_name": p.name, "purchase_price": p.purchase_price or 0,

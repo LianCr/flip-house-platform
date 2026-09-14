@@ -97,13 +97,16 @@ class ProjectOut(ORM):
     created_at: str
     updated_at: str
     property: PropertyBrief
-    budget_planned: float
-    budget_spent: float
+    budget_planned: Optional[float] = None   # 青灰看不到钱时为 None
+    budget_spent: Optional[float] = None
     budget_used_pct: Optional[float] = None
+    money_hidden: bool = False
     missing_fields: list[str] = []
     analysis_count: int = 0
     current_stage: Optional[dict] = None
     next_up: list[dict] = []
+    stage_progress: list[dict] = []      # 五段各自 done/total 与大节点状态，工作台卡片用
+    earlier_undone_count: int = 0
 
 
 class FieldIn(BaseModel):
@@ -241,11 +244,15 @@ class FileOut(ORM):
     amount: Optional[float] = None
     source: str
     uploaded_by: Optional[str] = None
+    step_key: Optional[str] = None
+    expires_at: Optional[str] = None
     uploaded_at: str
 
 
 class FilePatch(BaseModel):
     uploaded_by: Optional[str] = None
+    step_key: Optional[str] = None
+    expires_at: Optional[str] = None
     doc_type: Optional[str] = None
     stage: Optional[str] = None
     doc_date: Optional[str] = None
@@ -353,7 +360,7 @@ class PrefillOut(BaseModel):
 
 
 class DashboardWidgets(BaseModel):
-    upcoming: list[dict]
+    upcoming: list[dict]  # 关键日期 + 保险到期
     capital: list[dict]
     retrospectives: list[dict]
     weekly_spend: list[dict]
@@ -375,6 +382,97 @@ class UpdateOut(ORM):
 class StepToggleIn(BaseModel):
     done: bool = True
     note: Optional[str] = None
+    confirm_as: Optional[str] = None  # 大节点：以 D 或 J 的身份确认；不传则用当前身份
+
+
+# ---------- 水电瓦斯与检查记录 ----------
+class UtilityIn(BaseModel):
+    company: Optional[str] = None
+    account_no: Optional[str] = None
+    login: Optional[str] = None
+    password: Optional[str] = None
+    opened_under: Optional[str] = None
+    status: str = "not_started"
+    blocker: Optional[str] = None
+
+
+class UtilityOut(ORM):
+    id: int
+    project_id: int
+    kind: str
+    company: Optional[str] = None
+    account_no: Optional[str] = None
+    login: Optional[str] = None
+    password: Optional[str] = None
+    opened_under: Optional[str] = None
+    status: str
+    blocker: Optional[str] = None
+    updated_by: Optional[str] = None
+    updated_at: str
+
+
+class InspectionIn(BaseModel):
+    name: str
+    date: Optional[str] = None
+    result: str = "scheduled"
+    is_final: bool = False
+    fixer: Optional[str] = None
+    note: Optional[str] = None
+
+
+class InspectionPatch(BaseModel):
+    name: Optional[str] = None
+    date: Optional[str] = None
+    result: Optional[str] = None
+    is_final: Optional[bool] = None
+    fixer: Optional[str] = None
+    note: Optional[str] = None
+
+
+class InspectionOut(ORM):
+    id: int
+    project_id: int
+    name: str
+    date: Optional[str] = None
+    result: str
+    is_final: bool
+    fixer: Optional[str] = None
+    note: Optional[str] = None
+    recorded_by: Optional[str] = None
+    created_at: str
+
+
+class ProcurementItemOut(ORM):
+    id: int
+    project_id: int
+    wave: str
+    name: str
+    status: str
+    note: Optional[str] = None
+    sort_order: int = 0
+    updated_by: Optional[str] = None
+    updated_at: str
+
+
+class ProcurementPatchIn(BaseModel):
+    status: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ProcurementSummary(BaseModel):
+    total: int
+    pending_spec: int
+    pending_order: int
+    ordered: int
+    received: int
+    exception: int
+    na: int
+
+
+class ProcurementListOut(BaseModel):
+    items: list[ProcurementItemOut]
+    summary: ProcurementSummary
+    template_missing: bool = False   # 老项目没灌过模板
 
 
 class StepsOut(BaseModel):
@@ -382,3 +480,4 @@ class StepsOut(BaseModel):
     current_stage: dict
     next_up: list[dict]
     earlier_undone: list[dict] = []
+    stage_progress: list[dict] = []

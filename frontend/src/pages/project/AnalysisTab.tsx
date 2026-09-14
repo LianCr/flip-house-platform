@@ -193,9 +193,9 @@ export default function AnalysisTab({ project, reload }: { project: Project; rel
           <Metric label="总利润" value={money(out.total_profit)} sub={profitable ? '售价减全部成本' : '亏损：成本高于售价'} tone={profitable ? 'good' : 'bad'} />
           <Metric label="利润率" value={pct(out.profit_margin_pct)} sub="利润 ÷ 总成本" />
           <Metric label="回报率" value={pct(out.roi_pct)} sub="利润 ÷ 现金投入" />
-          <Metric label="权益倍数" value={out.equity_multiple == null ? '—' : `${out.equity_multiple.toFixed(2)}×`} sub="售价 ÷ 现金投入" />
+          <Metric label="权益倍数" value={out.equity_multiple == null ? '—' : `${out.equity_multiple.toFixed(2)}×`} sub="卖出还清贷款后拿回的现金 ÷ 现金投入" />
           <Metric label="总成本" value={money(out.total_costs)} sub="买入 + 持有 + 装修 + 卖出" />
-          <Metric label="现金投入" value={money(out.cash_invested)} sub={fin.enabled ? `首付 ${money(out.down_payment)} + 杂费 + 装修 + 持有` : '全款：买入 + 杂费 + 装修 + 持有'} />
+          <Metric label="现金投入" value={money(out.cash_invested)} sub={fin.enabled ? `首付 ${money(out.down_payment)} + 杂费 + 装修 + 持有 + 已还本金 ${money(out.principal_paid)}` : '全款：买入 + 杂费 + 装修 + 持有'} />
           <Metric label="售价" value={money(out.sale_price)} sub="修好后能卖多少" />
           <Metric label="装修合计" value={money(out.rehab_total)} sub={`${inputs.rehab_items.length} 行明细`} />
         </ColumnLayout>
@@ -234,7 +234,7 @@ export default function AnalysisTab({ project, reload }: { project: Project; rel
               )}
               {fin.enabled && (
                 <Box variant="small" color="text-body-secondary">
-                  贷款 {money(out.loan_amount)}，首付 {money(out.down_payment)}，月供 {money(out.monthly_payment)}。{sources.financing?.note}
+                  贷款 {money(out.loan_amount)}，首付 {money(out.down_payment)}，月供 {money(out.monthly_payment)}。持有期内利息 {money(out.interest_total)} 计入成本，本金 {money(out.principal_paid)} 不计成本（卖出时从贷款余额 {money(out.loan_balance_at_sale)} 里省回来）。{sources.financing?.note}
                 </Box>
               )}
             </SpaceBetween>

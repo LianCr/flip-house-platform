@@ -148,3 +148,30 @@ CLAUDE.md                    产品研究框架与工作原则
 2. 接真实数据源：Google 地理编码与街景、RentCast、ATTOM、HouseCanary（见 `docs/候选API方案.docx`）。
 3. AI：文件自动分类与抽取、街景风格与状况判断、助手接大模型（界面不变）。
 4. 用公司历史项目替换分析器里的行业默认值（装修单价、持有月数、卖出比例）。
+
+## 流程按录音稿重拆（2026-09-14）
+
+- **五个阶段**：`STAGE_CHECKLIST` 改为负责人自己拆的 买 / 贷 / 设计定稿 + permit / 施工 + 采购 / 卖。每个阶段带一句 `desc` 说明谁管、什么是前提。
+- **大节点 D + J 双勾**：带 `confirm: ["D","J"]` 的项在 `project_steps` 里存两条（`open_escrow:D`、`open_escrow:J`），两条都在才算过。`POST /steps/{key}` 用 `confirm_as` 指明替谁勾；当前身份就是 D 或 J 则不用传；负责人代勾记成“D（负责人 代勾）”。
+- **水电瓦斯**：`utility_accounts` 每套房三行（water / electric / gas），`GET/PUT /api/projects/{id}/utilities/{kind}`。证据规则 `utilities:on`（三家都开过）/ `utilities:off`（三家都关）。
+- **检查记录**：`inspections` 一次一行，`is_final` + `passed` 触发 `inspections:final`，`final` 大节点自动过；任一通过触发 `inspections:any`。接口 `/api/projects/{id}/inspections`、`/api/inspections/{iid}`。
+- **保险到期**：`files.expires_at`；工作台“未来 30 天”和“需要关注”都会提。
+- **分工调整**：J = Jessie，兼采购（原 A）；新增 PM；施工进度与临时安排由 L + D 定。permit 默认范围在 `PERMIT_RULE`（常识值，每套房可改）。
+- **还没做**：采购清单（等 J 的采购表定字段，预算页留了位置）；密码谁能看（没有登录，回头定）。
+
+## 角色、权限与交付物（2026-09-14 晚，流程审计 v2）
+
+- 理解文档：`docs/流程角色与交付物_v2.md`（给客户核对；⚠ 项待确认）。
+- **四级权限**：`ROLES` / `TIERS` / `PERMISSIONS` 在 `dictionaries.py`。紫 决策（老板、D、J）、蓝 统筹（负责人、L、PM）、青 执行（K、Z、S、W、A、设计师）、灰 外部（园丁、承包商）。后端 `common.require()` 越权返回 403；`project_out(actor)` 对青灰抹掉钱（`money_hidden`）；预算、分析、工作台三个路由整体挂 `_guard`。前端 `lib/role.ts::useRole()` 读同一份字典决定页签、按钮、首页。
+- **交付物**：`STAGE_CHECKLIST` 每项带 `deliverable {kind: file|photo|field|record|confirm|tick}`；`files.step_key` 把文件挂到步骤；新证据规则 `photo:<step_key>`；大节点 `evidence: confirm` 只认 D、J 的勾。
+- **清单表** `StepsPanel`：事 · 谁 · 要交什么 · 状态；按钮直接交（`UploadForm` 复用，`patchProject` 填数）。
+- **我的待办** `pages/MyTodo.tsx`：青灰身份首页。
+- 新文件类型：量尺记录、定稿图纸、permit 申请回执、offer、卖房文件包、签署版卖房文件、现场照片。
+
+## 流程审计 v3（2026-09-14，以团队定稿为准）
+
+团队定稿的完整流程（`专业流程 完整版.jpg`，6 段 33 项）与系统现有五段清单的逐项映射、门的位置、角色推断、缺失对象、要强制的前置和 24 个开放问题，见 `docs/流程审计与开放问题_v3.md`。下一轮按它重排清单。
+
+## 第一批最小修复（2026-09-14 晚）
+
+按两份审计核实的 P0：`compute_steps` 的"全部完成"要求前段无遗留；总览 B 面板按顺序渲染每段所有大节点；`final` 门要求最近一次 `is_final` 检查 passed；青灰身份在 steps 证据 / updates 文本 / files.amount / 下载四处抹钱（`MONEY_FIELDS`、`MONEY_DOCS` 在 `dictionaries.py`）；房产字段写接口加 `require(edit_project)`；非 `upload_any` 的上传人强制为本人、PATCH 不能改类型 / 步骤 / 上传人；分析器 `amortize()` 拆利息与本金，权益倍数改为回收现金 ÷ 现金投入（前后端同改）。

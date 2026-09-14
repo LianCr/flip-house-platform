@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..db import get_db
 from ..dictionaries import PROPERTY_FIELDS
-from .common import cast_value, get_actor, log_update, set_field_with_source
+from .common import cast_value, get_actor, log_update, require, set_field_with_source
 
 FIELD_LABEL = {f["key"]: f["label"] for f in PROPERTY_FIELDS}
 
@@ -51,6 +51,7 @@ def get_property(project_id: int, db: Session = Depends(get_db)):
 
 @router.patch("", response_model=schemas.PropertyDataOut)
 def patch_field(project_id: int, body: schemas.FieldPatch, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    require(actor, "edit_project", what="改房产数据")
     prop = _prop(db, project_id)
     if body.field not in {f["key"] for f in PROPERTY_FIELDS}:
         raise HTTPException(400, "未知字段")
@@ -63,6 +64,7 @@ def patch_field(project_id: int, body: schemas.FieldPatch, db: Session = Depends
 
 @router.post("/fields/{field}/primary", response_model=schemas.PropertyDataOut)
 def set_primary(project_id: int, field: str, body: schemas.PrimaryIn, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    require(actor, "edit_project", what="改房产数据")
     prop = _prop(db, project_id)
     target = None
     for s in prop.field_sources:

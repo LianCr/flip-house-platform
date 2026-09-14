@@ -1,5 +1,6 @@
 """阶段清单与更新记录。"""
 
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -9,13 +10,17 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from ..dictionaries import STAGE_CHECKLIST
+from ..dictionaries import ITEM_EVIDENCE, STAGE_CHECKLIST
 from ..steps import compute_steps
-from .common import get_actor, log_update
+from .common import allowed, can_read_money, get_actor, log_update
+
+MONEY_RE = re.compile(r"\$[\d,]+(?:\.\d+)?")
 
 router = APIRouter(prefix="/api", tags=["steps"])
 
 ITEM_TITLE = {it["key"]: it["title"] for st in STAGE_CHECKLIST for it in st["items"]}
+ITEM_CONFIRM = {it["key"]: it.get("confirm") or [] for st in STAGE_CHECKLIST for it in st["items"]}
+ITEM_OWNERS = {it["key"]: it["owners"] for st in STAGE_CHECKLIST for it in st["items"]}
 
 
 def _project(db: Session, project_id: int) -> models.Project:
@@ -26,8 +31,8 @@ def _project(db: Session, project_id: int) -> models.Project:
 
 
 @router.get("/projects/{project_id}/steps", response_model=schemas.StepsOut)
-def get_steps(project_id: int, db: Session = Depends(get_db)):
-    return compute_steps(db, _project(db, project_id))
+def get_steps(project_id: int, db: Session = Depends(get_db), actor: str = Depends(get_actor)):
+    return compute_steps(db, _project(db, project_id), hide_money=not can_read_money(actor))
 
 
 @router.post("/projects/{project_id}/steps/{key}", response_model=schemas.StepsOut)
@@ -35,36 +40,70 @@ def toggle_step(project_id: int, key: str, body: schemas.StepToggleIn, db: Sessi
     p = _project(db, project_id)
     if key not in ITEM_TITLE:
         raise HTTPException(400, "未知清单项")
-    rec = db.scalar(select(models.ProjectStep).where(models.ProjectStep.project_id == project_id, models.ProjectStep.key == key))
+    confirm = ITEM_CONFIRM[key]
+    store_key = key
+    who_label = actor
+    if key == "final" and body.done:
+        # final 这道门要有验收通过的记录才能确认；最近一次 final 检查没过也不行
+        finals = sorted([i for i in p.inspections if i.is_final], key=lambda i: (i.date or "", i.id))
+        if not finals or finals[-1].result != "passed":
+            raise HTTPException(400, "final 检查还没通过，不能确认这道门" + ("（最近一次没过）" if finals else "（还没有标 final 的检查记录）"))
+    if confirm:
+        # 大节点：以 D 或 J 的身份确认。当前身份是 D/J 就用自己，负责人代勾要指明替谁勾
+        as_who = body.confirm_as or (actor if actor in confirm else None)
+        if as_who not in confirm:
+            raise HTTPException(400, f"大节点要由 {' 和 '.join(confirm)} 确认，请选择以谁的身份勾")
+        if as_who != actor and not allowed(actor, "confirm_for_others"):
+            raise HTTPException(403, f"{actor} 不能替 {as_who} 确认大节点")
+        store_key = f"{key}:{as_who}"
+        who_label = as_who if as_who == actor else f"{as_who}（{actor} 代勾）"
+    else:
+        if ITEM_EVIDENCE.get(key, "manual") != "manual":
+            # 有自动证据的项：只有紫蓝能手工确认（记成“无证据”），执行角色要交东西
+            if not allowed(actor, "tick_any"):
+                raise HTTPException(400, f"“{ITEM_TITLE[key]}”要交东西才算完成，不能手工勾")
+            who_label = f"{actor}（手工确认，无证据）"
+        elif actor not in ITEM_OWNERS[key] and not allowed(actor, "tick_any"):
+            raise HTTPException(403, f"“{ITEM_TITLE[key]}”由 {'、'.join(ITEM_OWNERS[key])} 负责，{actor} 不能勾")
+        elif actor not in ITEM_OWNERS[key]:
+            who_label = f"{actor}（代勾）"
+    rec = db.scalar(select(models.ProjectStep).where(models.ProjectStep.project_id == project_id, models.ProjectStep.key == store_key))
     if rec is None:
-        rec = models.ProjectStep(project_id=project_id, key=key)
+        rec = models.ProjectStep(project_id=project_id, key=store_key)
         db.add(rec)
     rec.done = body.done
-    rec.done_by = actor if body.done else None
+    rec.done_by = who_label if body.done else None
     rec.done_at = datetime.now().isoformat(timespec="seconds") if body.done else None
     rec.note = body.note
-    log_update(db, project_id, actor, "step", f"{'完成了' if body.done else '取消了'}“{ITEM_TITLE[key]}”" + (f"：{body.note}" if body.note else ""))
+    if confirm:
+        as_who = store_key.split(":")[1]
+        head = ("替 " + as_who + " 确认了" if as_who != actor else "确认了") if body.done else ("取消了替 " + as_who + " 的确认：" if as_who != actor else "取消了确认：")
+        text = f"{head}“{ITEM_TITLE[key]}”" if body.done else f"{head}“{ITEM_TITLE[key]}”"
+    else:
+        text = f"{'完成了' if body.done else '取消了'}“{ITEM_TITLE[key]}”"
+    log_update(db, project_id, actor, "step", text + (f"：{body.note}" if body.note else ""))
     db.commit()
-    return compute_steps(db, p)
+    return compute_steps(db, p, hide_money=not can_read_money(actor))
 
 
-def _with_names(db: Session, rows: list[models.ProjectUpdate]) -> list[schemas.UpdateOut]:
+def _with_names(db: Session, rows: list[models.ProjectUpdate], actor: str = "负责人") -> list[schemas.UpdateOut]:
     names = {p.id: p.name for p in db.scalars(select(models.Project)).all()}
+    hide = not can_read_money(actor)
     return [schemas.UpdateOut(id=r.id, project_id=r.project_id, project_name=names.get(r.project_id), actor=r.actor, kind=r.kind,
-                              text=r.text, created_at=r.created_at) for r in rows]
+                              text=(MONEY_RE.sub("$***", r.text) if hide else r.text), created_at=r.created_at) for r in rows]
 
 
 @router.get("/updates", response_model=list[schemas.UpdateOut])
-def all_updates(limit: int = 30, actor: Optional[str] = None, db: Session = Depends(get_db)):
+def all_updates(limit: int = 30, actor: Optional[str] = None, db: Session = Depends(get_db), me: str = Depends(get_actor)):
     stmt = select(models.ProjectUpdate).order_by(models.ProjectUpdate.created_at.desc(), models.ProjectUpdate.id.desc()).limit(limit)
     if actor:
         stmt = stmt.where(models.ProjectUpdate.actor == actor)
-    return _with_names(db, db.scalars(stmt).all())
+    return _with_names(db, db.scalars(stmt).all(), me)
 
 
 @router.get("/projects/{project_id}/updates", response_model=list[schemas.UpdateOut])
-def project_updates(project_id: int, limit: int = 30, db: Session = Depends(get_db)):
+def project_updates(project_id: int, limit: int = 30, db: Session = Depends(get_db), me: str = Depends(get_actor)):
     _project(db, project_id)
     stmt = (select(models.ProjectUpdate).where(models.ProjectUpdate.project_id == project_id)
             .order_by(models.ProjectUpdate.created_at.desc(), models.ProjectUpdate.id.desc()).limit(limit))
-    return _with_names(db, db.scalars(stmt).all())
+    return _with_names(db, db.scalars(stmt).all(), me)
